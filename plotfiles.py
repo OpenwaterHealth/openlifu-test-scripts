@@ -206,9 +206,9 @@ def plot_all(files_data):
             c, tx, amb = [s[1] for s in samples], [s[2] for s in samples], [s[3] for s in samples]
 
             base_label = fname.name
-            plt.plot(t, c, label=f"{base_label} - Console")
+            # plt.plot(t, c, label=f"{base_label} - Console")
             plt.plot(t, tx, label=f"{base_label} - TX", linestyle="--")
-            plt.plot(t, amb, label=f"{base_label} - Ambient", linestyle=":")
+            # plt.plot(t, amb, label=f"{base_label} - Ambient", linestyle=":")
 
         if has_temp_data:
             plt.title(f"Test Case {tc} – Temperatures")
