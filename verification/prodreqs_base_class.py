@@ -33,6 +33,8 @@ from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 
+from config import *
+
 """
 Thermal Stress Test Script
 - User selects a test case.
@@ -76,33 +78,7 @@ TEST_CASES = [
     {"voltage": 5,  "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
 ]
 
-TEST_CASE_DURATION_SECONDS = 10 * 60
-TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS = 5 * 60
-LOW_VOLTAGE_VALUE = 20
-LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS = 60
 
-VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS = 60
-TEST_RUNTHROUGH_TEMPERATURE_BYPASS_C = 60.0
-
-SHORT_TEST_DURATION_SECONDS = 60
-
-# Pulse/sequence timing
-INTERVAL_MSEC = {1: 100, 2: 200}  # Default to 100 ms interval
-NUM_MODULES = (1, 2)
-
-# Default safety / logging timing parameters
-# Temperature shutoff thresholds
-CONSOLE_SHUTOFF_TEMP_C_DEFAULT = 70.0
-TX_SHUTOFF_TEMP_C_DEFAULT = 70.0
-AMBIENT_SHUTOFF_TEMP_C_DEFAULT = 70.0
-
-# Voltage deviation limits
-VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT = 2.0
-VOLTAGE_DEVIATION_PERCENTAGE_LIMIT = 2.0
-
-# Temperature monitoring intervals
-TEMPERATURE_CHECK_INTERVAL_DEFAULT = 1.0
-TEMPERATURE_LOG_INTERVAL_DEFAULT = 1.0
 
 
 class SafeFormatter(logging.Formatter):
@@ -136,7 +112,8 @@ def calculate_temperature_discharge_time_seconds(final_temp_C: float) -> float:
     return 60.0*minutes # temp value until formula figured out
 '''
 
-class TestSonicationDuration:
+
+class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
 
     def __init__(self, args):
@@ -157,6 +134,7 @@ class TestSonicationDuration:
         self.mutex = threading.Lock()
 
         self.stop_logging = False
+        # self.voltage_accuracy_test = True
 
         self.run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.start_time: float | None = None
@@ -193,7 +171,6 @@ class TestSonicationDuration:
 
         self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
 
-
     def _setup_logging(self) -> logging.Logger:
         """Configure root logger with console output; file handler added later."""
         logger = logging.getLogger(__name__)
@@ -222,6 +199,7 @@ class TestSonicationDuration:
         logger.propagate = False
         return logger
 
+    ###### going to be different for each test, may want to move to child class ######
     def _attach_file_handler(self) -> None:
         """Attach a file handler for this run once test case is known."""
         if not self.args.skip_logfile:
@@ -251,43 +229,9 @@ class TestSonicationDuration:
 
 
     # ------------------- User Input Section ------------------- #
-    def _select_frequency(self) -> None:
-        """Select TX frequency in kHz (100–500), CLI override or interactive."""
-        # CLI override
-        if self.args.frequency is not None:
-            self.frequency_khz = self.args.frequency
-            return
 
-        while True:
-            choice = input("Enter TX frequency in kHz (100–500): ").strip()
-            try:
-                freq = int(choice)
-            except ValueError:
-                self.logger.info("Invalid input. Enter an integer value.")
-                continue
-
-            if 100 <= freq <= 500:
-                self.frequency_khz = freq
-                return
-
-            self.logger.info("Frequency must be between 100 and 500 kHz.")
-
-    def _select_num_modules(self) -> None:
-        """Interactively select number of modules."""
-        # CLI override
-        if self.args.num_modules is not None:
-            self.num_modules = self.args.num_modules
-            return
-
-        while True:
-            choice = input(f"Select number of modules {list(NUM_MODULES)}: ")
-            if choice.isdigit() and int(choice) in NUM_MODULES:
-                self.num_modules = int(choice)
-                break
-            self.logger.info("Invalid selection. Please try again.")
 
     def _select_starting_test_case(self) -> None:
-
         valid_test_nums = list(range(1, len(TEST_CASES) + 1))
 
         # Test case selection
@@ -495,18 +439,21 @@ class TestSonicationDuration:
 
         self.logger.info("Solution configured for Test Case %s.", self.test_case_num)
 
-    def test_console_voltage_accuracy_no_load(self) -> None:
-        """Test console voltage accuracy under no-load conditions."""
-        if self.interface is None:
-            self.logger.error("Interface not connected for voltage accuracy test.")
-            return
+    # def test_console_voltage_accuracy_no_load(self) -> None:
+    #     """Test console voltage accuracy under no-load conditions."""
+    #     if self.interface is None:
+    #         self.logger.error("Interface not connected for voltage accuracy test.")
+    #         return
 
-        try:
-            self.interface.hvcontroller.turn_hv_on()
-        except SerialException as e:
-            self.logger.error("SerialException encountered while reading console voltage: %s", e)
-        except Exception as e:
-            self.logger.error("Unexpected error while reading console voltage: %s", e)
+    #     for test_case in range(0, len(TEST_CASES)//2):  # Run for 2 test cases as a quick check
+    #         self.logger.info(f"Starting console voltage accuracy test for Test Case {test_case} with no load for {VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS} seconds.")
+    #         try:
+    #             self.interface.hvcontroller.set_voltage(self.voltage)
+    #             self.interface.hvcontroller.turn_hv_on()
+    #         except SerialException as e:
+    #             self.logger.error("SerialException encountered while reading console voltage: %s", e)
+    #         except Exception as e:
+    #             self.logger.error("Unexpected error while reading console voltage: %s", e)
 
     def monitor_console_voltage(self) -> None:
         """Thread target: monitor console voltage."""
@@ -1085,26 +1032,26 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 This script interactively prompts for:
-  * TX frequency (kHz)
-  * Predefined burn-in test case (voltage, duty, duration)
+* TX frequency (kHz)
+* Predefined burn-in test case (voltage, duty, duration)
 
 Examples:
-  # Run with default settings
-  %(prog)s
+# Run with default settings
+%(prog)s
 
-  # Run using external power supply
-  %(prog)s --external-power
+# Run using external power supply
+%(prog)s --external-power
 
-  # Run with more aggressive console shutoff
-  %(prog)s --console-shutoff-temp 65
+# Run with more aggressive console shutoff
+%(prog)s --console-shutoff-temp 65
 
-  # Run in quiet mode writing logs to ./logs
-  %(prog)s --quiet --log-dir ./logs
+# Run in quiet mode writing logs to ./logs
+%(prog)s --quiet --log-dir ./logs
 
-  # Run without "Press ENTER to start" prompt
-  %(prog)s --no-prompt
+# Run without "Press ENTER to start" prompt
+%(prog)s --no-prompt
 
-  # Run a specific test case and frequency non-interactively
+# Run a specific test case and frequency non-interactively
     %(prog)s --frequency 400 --test-case 2 --no-prompt
 """,
     )
@@ -1243,35 +1190,40 @@ Examples:
 
     return parser.parse_args()
 
-def main() -> None:
-    """Main entry point for the script."""
-    args = parse_arguments()
-    test = TestSonicationDuration(args)
+# def main() -> None:
+#     """Main entry point for the script."""
+#     args = parse_arguments()
+#     voltage_test = VoltageAccuracyTest(args)
+#     temp_and_voltage_stability_test = TransmitterHeatingAndVoltageStabilityTest(args)
 
-    try:
-        test.run()
-    except KeyboardInterrupt:
-        test.logger.info("\nUser interrupted. Shutting down...")
-        test.shutdown_event.set()
-        test.stop_logging = True
-        time.sleep(0.5)
-        with contextlib.suppress(Exception):
-            test.print_test_summary()
-            test.turn_off_console_and_tx()
-        with contextlib.suppress(Exception):
-            test.cleanup_interface()
-        sys.exit(0)
-    except Exception as e:
-        test.logger.error(f"\nFatal error: {e}")
-        test.print_test_summary()
-        with contextlib.suppress(Exception):
-            test.turn_off_console_and_tx()
-        with contextlib.suppress(Exception):
-            test.cleanup_interface()
-        sys.exit(1)
+#     try:
+#         voltage_test.run()
+#         temp_and_voltage_stability_test.run()
+#     except KeyboardInterrupt:
+#         for test in (voltage_test, temp_and_voltage_stability_test):
+#             test.logger.warning("Test aborted by user KeyboardInterrupt. Shutting down...")
+#             test.shutdown_event.set()
+#             test.stop_logging = True
+#             time.sleep(0.5)
+#             with contextlib.suppress(Exception):
+#                 test.print_test_summary()
+#                 test.turn_off_console_and_tx()
+#             with contextlib.suppress(Exception):
+#                 test.cleanup_interface()
+#         sys.exit(0)
+#     except Exception as e:
+#         test.logger.error(f"\nFatal error: {e}")
+#         for test in (voltage_test, temp_and_voltage_stability_test):
+#             with contextlib.suppress(Exception):
+#                 test.print_test_summary()
+#             with contextlib.suppress(Exception):
+#                 test.turn_off_console_and_tx()
+#             with contextlib.suppress(Exception):
+#                 test.cleanup_interface()
+#         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 
