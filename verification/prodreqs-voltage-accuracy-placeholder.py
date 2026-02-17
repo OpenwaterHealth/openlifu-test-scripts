@@ -21,12 +21,13 @@ from openlifu.db import Database
 from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
-from prodreqs_base_class import TestSonicationDurationBase
-from prodreqs_base_class import parse_arguments, NUM_MODULES, frequency_khz, format_duration, format_hhmmss
+from prodreqs_base_class import *
 from config import *
 
 # config.py
 TEST_VOLTAGES = [65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
+MAX_PERCENT_VOLTAGE_DEVIATION = 2.0
+SEQUENCE_DURATION_SECONDS = 5
 
 class VoltageAccuracyTest(TestSonicationDurationBase):
     """Data class to hold voltage accuracy test results."""
@@ -36,7 +37,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.max_voltage_deviation_absolute: float | None = None
         self.max_voltage_deviation_percentage: float | None = None
         self.test_time_elapsed: float | None = None
-        self.sequence_duration: float | None = None
+        self.sequence_duration: float = SEQUENCE_DURATION_SECONDS
 
     def _select_starting_test_case(self) -> None:
         valid_test_nums = list(range(1, len(TEST_VOLTAGES) + 1))
@@ -76,44 +77,40 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
 
         for test_case, test_case_parameters in enumerate((TEST_VOLTAGES)[self.starting_test_case-1:], start=self.starting_test_case):
             self.test_case_num = test_case
-            self.test_results[self.test_case_num] = self.TestCaseResult()
-            self.voltage = float(test_case_parameters["voltage"])
-            self.interval_msec = int(test_case_parameters["PRI_ms"])
-            self.duration_msec = int(test_case_parameters["duty_cycle"] / 100 * self.interval_msec)
+            self.test_results[self.test_case_num] = TestCaseResult()
+            self.voltage = test_case_parameters
+            # self.interval_msec = int(test_case_parameters["PRI_ms"])
+            # self.duration_msec = int(test_case_parameters["duty_cycle"] / 100 * self.interval_msec)
             
             self.logger.info(f"Starting test case {self.test_case_num} out of {len(TEST_VOLTAGES)}")
-            self.logger.info("Test Case %d: %dV, %d%% Duty Cycle, %dms duration, %dms PRI, Max Starting Temperature: %dC",
+            self.logger.info("Test Case %d: %dV",
                              self.test_case_num, 
-                             self.voltage, 
-                             test_case_parameters["duty_cycle"], 
-                             self.duration_msec, 
-                             self.interval_msec, 
-                             test_case_parameters["max_starting_temperature"])
+                             self.voltage)
 
             test_case_start_time = 0
 
             try:
                 if not self.hw_simulate:
-                    self.connect_device()
-                    self.verify_communication()
+                    self.connect_device(bypass_tx=True)
+                    self.verify_communication(bypass_tx=True)
 
                     # if test has already run at least once, skip
                     if test_case == self.starting_test_case: 
-                        self.get_firmware_versions()
-                        self.enumerate_devices()
+                        self.get_firmware_versions(bypass_tx_fw=True)
+                        # self.enumerate_devices()
                         
-                    self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
+                    # self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
                 else:
                     self.logger.info("Hardware simulation enabled; skipping device configuration.")
 
-                if self.voltage_accuracy_test:
-                    self.sequence_duration = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
-                elif self.test_runthrough:
-                    self.sequence_duration = SHORT_TEST_DURATION_SECONDS
-                elif self.voltage is not None and self.voltage <= LOW_VOLTAGE_VALUE:
-                    self.sequence_duration = LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS
-                else:
-                    self.sequence_duration = TEST_CASE_DURATION_SECONDS
+                # if self.voltage_accuracy_test:
+                #     self.sequence_duration = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
+                # elif self.test_runthrough:
+                #     self.sequence_duration = SHORT_TEST_DURATION_SECONDS
+                # elif self.voltage is not None and self.voltage <= LOW_VOLTAGE_VALUE:
+                #     self.sequence_duration = LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS
+                # else:
+                #     self.sequence_duration = TEST_CASE_DURATION_SECONDS
 
             
                 self.logger.info("Running console voltage accuracy test under no-load conditions...")
@@ -145,7 +142,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 )
                 
                 voltage_thread.start()
-                temp_thread.start()
+                # temp_thread.start()
                 completion_thread.start()
 
                 # Wait for threads or user interrupt
@@ -154,7 +151,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                         time.sleep(0.1)
                 except KeyboardInterrupt:
                     self.logger.warning("Test aborted by user KeyboardInterrupt.")
-                    test_status = "aborted by user"
+                    self.test_status = "aborted by user"
                     self.shutdown_event.set()
 
                 # Ensure shutdown event set
@@ -173,20 +170,20 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                         self.logger.error("Error stopping trigger: %s", e)
 
                 # Wait for threads to exit gracefully
-                temp_thread.join(timeout=5.0)
+                # temp_thread.join(timeout=5.0)
                 voltage_thread.join(timeout=5.0)
                 completion_thread.join(timeout=5.0)
 
                 # Determine final status
-                if test_status not in ("aborted by user", "error"):
+                if self.test_status not in ("aborted by user", "error"):
                     if self.sequence_complete_event.is_set():
-                        test_status = "passed"
+                        self.test_status = "passed"
                     elif self.temperature_shutdown_event.is_set():
-                        test_status = "temperature shutdown"
+                        self.test_status = "temperature shutdown"
                     elif self.voltage_shutdown_event.is_set():
-                        test_status = "voltage deviation"
+                        self.test_status = "voltage deviation"
                     else:
-                        test_status = "error"
+                        self.test_status = "error"
 
             finally:
                 # Record test time
@@ -201,22 +198,22 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                     self.cleanup_interface()
 
                 # Final status log
-                if test_status == "passed":
+                if self.test_status == "passed":
                     self.logger.info("TEST CASE %d PASSED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "PASSED"
-                elif test_status == "temperature shutdown":
+                elif self.test_status == "temperature shutdown":
                     self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (temperature shutdown)"
-                elif test_status == "aborted by user":
+                elif self.test_status == "aborted by user":
                     self.logger.info("TEST CASE %d ABORTED by user.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "ABORTED"
-                elif test_status == "voltage deviation":
+                elif self.test_status == "voltage deviation":
                     self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (voltage deviation)"
-                elif test_status == "error":
+                elif self.test_status == "error":
                     self.logger.info("TEST CASE %d FAILED due to error.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (error)"
-                elif test_status == "not started":
+                elif self.test_status == "not started":
                     self.logger.info("TEST CASE %d NOT RUN.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "NOT RUN"
                 else:
@@ -237,9 +234,9 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.logger.info(
             "\n\nThis script will automatically cycle through all of the following test cases:\n\n"
             + "\n".join(
-                f"Test Case {i:>2}: "
+                f"Test Case {i:>2}: {tc}V"
                 # f"{tc['voltage']:>3}V, "
-                f"Max Starting Temperature: {tc['max_starting_temperature']:>3}C"
+                # f"Max Starting Temperature: {tc:>3}C"
                 for i, tc in enumerate(TEST_VOLTAGES[self.starting_test_case-1:], start=self.starting_test_case)
             )
             + "\n\nThe script will account for cooldown periods as needed between test cases. \n" \
@@ -255,24 +252,18 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
 
         for test_case, test_case_parameters in enumerate(TEST_VOLTAGES[self.starting_test_case - 1:], start=self.starting_test_case):
             r = self.test_results.get(test_case)
-            act_start  = f"{r.starting_temperature:.2f}C" if r and r.starting_temperature is not None else " -   "
-            final      = f"{r.final_temperature:.2f}C" if r and r.final_temperature is not None else " - "
+            # act_start  = f"{r.starting_temperature:.2f}C" if r and r.starting_temperature is not None else " -   "
+            # final      = f"{r.final_temperature:.2f}C" if r and r.final_temperature is not None else " - "
             max_dv     = f"{r.max_voltage_deviation_absolute:.2f}V" if r and r.max_voltage_deviation_absolute is not None else " - "
             max_dv_pct = f"{r.max_voltage_deviation_percentage:.2f}%" if r and r.max_voltage_deviation_percentage is not None else " - "
-            cooldown   = f"~{r.cooldown_time_elapsed}m" if r and r.cooldown_time_elapsed is not None else " - "
+            # cooldown   = f"~{r.cooldown_time_elapsed}m" if r and r.cooldown_time_elapsed is not None else " - "
             dur        = format_hhmmss(r.test_time_elapsed) if r and r.test_time_elapsed is not None else " - "
             status     = r.status if r and getattr(r, "status", None) else "NOT RUN"
             
             
             self.logger.info(
                 f"Test Case {test_case:>2}: "
-                f"{test_case_parameters['voltage']:>2}V, "
-                f"{test_case_parameters['duty_cycle']:>2}% DC, "
-                f"{test_case_parameters['PRI_ms']:>2}ms PRI, "
-                f"Max Start Temp: {test_case_parameters['max_starting_temperature']:>2}C, "
-                f"Cooldown Time: {cooldown:>5}, "
-                f"Actual Start Temp: {act_start:>6}, "
-                f"Final Temp: {final:>6}, "
+                f"{test_case_parameters:>2}V, "
                 f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({VOLTAGE_DEVIATION_PERCENTAGE_LIMIT:>3}%), "
                 f"Actual Voltage Deviation: {max_dv:>5} ({max_dv_pct:>5}) "
                 f"Duration Run: {dur:>5}  --> "

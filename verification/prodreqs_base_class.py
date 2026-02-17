@@ -147,6 +147,7 @@ class TestSonicationDurationBase:
         self.duration_msec: int | None = None
         self.num_modules: int | None = None
 
+        self.test_status: str | None = "not started"
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
         self.starting_test_case: int = 1
         self.test_results: dict[int, TestCaseResult] = {}
@@ -254,7 +255,7 @@ class TestSonicationDurationBase:
                     break
                 self.logger.info("Invalid selection. Please try again.")
 
-    def connect_device(self) -> None:
+    def connect_device(self, bypass_tx: bool = False) -> None:
         """Connect to the LIFU device and verify connection."""
         self.logger.info("Starting test...")
         self.interface = LIFUInterface(
@@ -265,6 +266,7 @@ class TestSonicationDurationBase:
             sequence_time_selection="stress_test"
         )
         tx_connected, hv_connected = self.interface.is_device_connected()
+        if bypass_tx: tx_connected = True
 
         if not self.use_external_power and not tx_connected:
             self.logger.warning("TX device not connected. Attempting to turn on 12V...")
@@ -304,13 +306,14 @@ class TestSonicationDurationBase:
             self.logger.info("  Using external power supply")
 
         if tx_connected:
-            self.logger.info("  TX Connected: %s", tx_connected)
-            self.logger.info("LIFU Device fully connected.")
+            if not bypass_tx:
+                self.logger.info("  TX Connected: %s", tx_connected)
+                self.logger.info("LIFU Device fully connected.")
         else:
             self.logger.error("TX NOT fully connected.")
             sys.exit(1)
 
-    def verify_communication(self) -> bool:
+    def verify_communication(self, bypass_tx: bool = False) -> bool:
         """Verify communication with the LIFU device."""
         if self.interface is None:
             self.logger.error("Interface not connected for communication verification.")
@@ -323,15 +326,18 @@ class TestSonicationDurationBase:
             self.logger.error("Console Communication verification failed: %s", e)
             return False
 
-        try:
-            if not self.interface.txdevice.ping():
-                self.logger.error("Failed to ping the transmitter device.")
+        if not bypass_tx:
+            try:
+                if not self.interface.txdevice.ping():
+                    self.logger.error("Failed to ping the transmitter device.")
+                return True
+            except Exception as e:
+                self.logger.error("TX Device Communication verification failed: %s", e)
+                return False
+        else:
             return True
-        except Exception as e:
-            self.logger.error("TX Device Communication verification failed: %s", e)
-            return False
 
-    def get_firmware_versions(self) -> None:
+    def get_firmware_versions(self, bypass_tx_fw: bool = False) -> None:
         """Retrieve and log firmware versions from the LIFU device."""
         if self.interface is None:
             self.logger.error("Interface not connected for firmware version retrieval.")
@@ -350,17 +356,18 @@ class TestSonicationDurationBase:
                 console_fw_mismatch = True
         except Exception as e:
             self.logger.error("Error retrieving console firmware version: %s", e)
-                
-        try:
-            for i in range(1, self.num_modules+1):
-                tx_fw = self.interface.txdevice.get_version(module=i)
-                self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
-                if not self.args.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
-                    self.logger.error("TX firmware version %s does not match required version %s.",
-                                    tx_fw, REQUIRED_TX_FW_VERSION)
-                    tx_fw_mismatch = True
-        except Exception as e:
-            self.logger.error("Error retrieving TX device firmware version: %s", e)        
+
+        if not bypass_tx_fw:        
+            try:
+                for i in range(1, self.num_modules+1):
+                    tx_fw = self.interface.txdevice.get_version(module=i)
+                    self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
+                    if not self.args.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
+                        self.logger.error("TX firmware version %s does not match required version %s.",
+                                        tx_fw, REQUIRED_TX_FW_VERSION)
+                        tx_fw_mismatch = True
+            except Exception as e:
+                self.logger.error("Error retrieving TX device firmware version: %s", e)        
 
         if console_fw_mismatch or tx_fw_mismatch:
             if console_fw_mismatch:
@@ -816,7 +823,7 @@ class TestSonicationDurationBase:
 
     def run(self) -> None:
         """Execute the thermal stress test with graceful shutdown."""
-        test_status = "not started"
+        self.test_status = "not started"
 
         try:
             self._select_num_modules()
@@ -877,14 +884,14 @@ class TestSonicationDurationBase:
                     self.logger.info("Starting Trigger...")
                     if not self.interface.start_sonication():
                         self.logger.error("Failed to start trigger.")
-                        test_status = "error"
+                        self.test_status = "error"
                         return
                     test_case_start_time = time.time()
                 else:
                     self.logger.info("Simulated Trigger start... (no hardware)")
 
                 self.logger.info("Trigger Running... (Press CTRL-C to stop early)")
-                test_status = "running"
+                self.test_status = "running"
 
                 # Start monitoring threads
                 self.shutdown_event.clear()
@@ -918,7 +925,7 @@ class TestSonicationDurationBase:
                         time.sleep(0.1)
                 except KeyboardInterrupt:
                     self.logger.warning("Test aborted by user KeyboardInterrupt.")
-                    test_status = "aborted by user"
+                    self.test_status = "aborted by user"
                     self.shutdown_event.set()
 
                 # Ensure shutdown event set
@@ -942,16 +949,15 @@ class TestSonicationDurationBase:
                 completion_thread.join(timeout=5.0)
 
                 # Determine final status
-                if test_status not in ("aborted by user", "error"):
+                if self.test_status not in ("aborted by user", "error"):
                     if self.sequence_complete_event.is_set():
-                        test_status = "passed"
+                        self.test_status = "passed"
                     elif self.temperature_shutdown_event.is_set():
-                        test_status = "temperature shutdown"
+                        self.test_status = "temperature shutdown"
                     elif self.voltage_shutdown_event.is_set():
-                        test_status = "voltage deviation"
+                        self.test_status = "voltage deviation"
                     else:
-                        test_status = "error"
-
+                        self.test_status = "error"
             finally:
                 # Record test time
                 # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
@@ -965,22 +971,22 @@ class TestSonicationDurationBase:
                     self.cleanup_interface()
 
                 # Final status log
-                if test_status == "passed":
+                if self.test_status == "passed":
                     self.logger.info("TEST CASE %d PASSED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "PASSED"
-                elif test_status == "temperature shutdown":
+                elif self.test_status == "temperature shutdown":
                     self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (temperature shutdown)"
-                elif test_status == "aborted by user":
+                elif self.test_status == "aborted by user":
                     self.logger.info("TEST CASE %d ABORTED by user.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "ABORTED"
-                elif test_status == "voltage deviation":
+                elif self.test_status == "voltage deviation":
                     self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (voltage deviation)"
-                elif test_status == "error":
+                elif self.test_status == "error":
                     self.logger.info("TEST CASE %d FAILED due to error.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "FAILED (error)"
-                elif test_status == "not started":
+                elif self.test_status == "not started":
                     self.logger.info("TEST CASE %d NOT RUN.", self.test_case_num)
                     self.test_results[self.test_case_num].status = "NOT RUN"
                 else:
