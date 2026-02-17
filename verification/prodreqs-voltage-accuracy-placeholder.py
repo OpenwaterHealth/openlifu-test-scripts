@@ -38,6 +38,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.max_voltage_deviation_percentage: float | None = None
         self.test_time_elapsed: float | None = None
         self.sequence_duration: float = SEQUENCE_DURATION_SECONDS
+        self.bypass_transmitter = True  # For voltage accuracy test, we can bypass TX communication
 
     def _select_starting_test_case(self) -> None:
         valid_test_nums = list(range(1, len(TEST_VOLTAGES) + 1))
@@ -91,12 +92,12 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
 
             try:
                 if not self.hw_simulate:
-                    self.connect_device(bypass_tx=True)
-                    self.verify_communication(bypass_tx=True)
+                    self.connect_device()
+                    self.verify_communication()
 
                     # if test has already run at least once, skip
                     if test_case == self.starting_test_case: 
-                        self.get_firmware_versions(bypass_tx_fw=True)
+                        self.get_firmware_versions()
                         # self.enumerate_devices()
                         
                     # self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
@@ -162,12 +163,12 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 # Stop sonication
                 if not self.hw_simulate and self.interface is not None:
                     try:
-                        if self.interface.stop_sonication():
-                            self.logger.info("Trigger stopped successfully.")
+                        if self.interface.hvcontroller.turn_hv_off():
+                            self.logger.info("HV stopped successfully.")
                         else:
-                            self.logger.error("Failed to stop trigger.")
+                            self.logger.error("Failed to stop HV.")
                     except Exception as e:
-                        self.logger.error("Error stopping trigger: %s", e)
+                        self.logger.error("Error stopping HV: %s", e)
 
                 # Wait for threads to exit gracefully
                 # temp_thread.join(timeout=5.0)

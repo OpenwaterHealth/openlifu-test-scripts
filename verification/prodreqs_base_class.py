@@ -129,6 +129,7 @@ class TestSonicationDurationBase:
         self.sequence_complete_event = threading.Event()
         self.temperature_shutdown_event = threading.Event()
         self.voltage_shutdown_event = threading.Event()
+        self.bypass_transmitter = False
         
         # Threading locks
         self.mutex = threading.Lock()
@@ -255,7 +256,7 @@ class TestSonicationDurationBase:
                     break
                 self.logger.info("Invalid selection. Please try again.")
 
-    def connect_device(self, bypass_tx: bool = False) -> None:
+    def connect_device(self) -> None:
         """Connect to the LIFU device and verify connection."""
         self.logger.info("Starting test...")
         self.interface = LIFUInterface(
@@ -266,7 +267,7 @@ class TestSonicationDurationBase:
             sequence_time_selection="stress_test"
         )
         tx_connected, hv_connected = self.interface.is_device_connected()
-        if bypass_tx: tx_connected = True
+        if self.bypass_transmitter: tx_connected = True
 
         if not self.use_external_power and not tx_connected:
             self.logger.warning("TX device not connected. Attempting to turn on 12V...")
@@ -306,14 +307,14 @@ class TestSonicationDurationBase:
             self.logger.info("  Using external power supply")
 
         if tx_connected:
-            if not bypass_tx:
+            if not self.bypass_transmitter:
                 self.logger.info("  TX Connected: %s", tx_connected)
                 self.logger.info("LIFU Device fully connected.")
         else:
             self.logger.error("TX NOT fully connected.")
             sys.exit(1)
 
-    def verify_communication(self, bypass_tx: bool = False) -> bool:
+    def verify_communication(self) -> bool:
         """Verify communication with the LIFU device."""
         if self.interface is None:
             self.logger.error("Interface not connected for communication verification.")
@@ -326,7 +327,7 @@ class TestSonicationDurationBase:
             self.logger.error("Console Communication verification failed: %s", e)
             return False
 
-        if not bypass_tx:
+        if not self.bypass_transmitter:
             try:
                 if not self.interface.txdevice.ping():
                     self.logger.error("Failed to ping the transmitter device.")
@@ -337,7 +338,7 @@ class TestSonicationDurationBase:
         else:
             return True
 
-    def get_firmware_versions(self, bypass_tx_fw: bool = False) -> None:
+    def get_firmware_versions(self) -> None:
         """Retrieve and log firmware versions from the LIFU device."""
         if self.interface is None:
             self.logger.error("Interface not connected for firmware version retrieval.")
@@ -357,7 +358,7 @@ class TestSonicationDurationBase:
         except Exception as e:
             self.logger.error("Error retrieving console firmware version: %s", e)
 
-        if not bypass_tx_fw:        
+        if not self.bypass_transmitter:        
             try:
                 for i in range(1, self.num_modules+1):
                     tx_fw = self.interface.txdevice.get_version(module=i)
