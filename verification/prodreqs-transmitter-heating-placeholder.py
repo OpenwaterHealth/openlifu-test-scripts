@@ -29,41 +29,6 @@ class transmitter_heating_placeholder(TestSonicationDurationBase):
         self.args = args
         self.logger = self._setup_logging()
 
-    def _select_frequency(self) -> None:
-        """Select TX frequency in kHz (100–500), CLI override or interactive."""
-        # CLI override
-        if self.args.frequency is not None:
-            self.frequency_khz = self.args.frequency
-            return
-
-        while True:
-            choice = input("Enter TX frequency in kHz (100–500): ").strip()
-            try:
-                freq = int(choice)
-            except ValueError:
-                self.logger.info("Invalid input. Enter an integer value.")
-                continue
-
-            if 100 <= freq <= 500:
-                self.frequency_khz = freq
-                return
-
-            self.logger.info("Frequency must be between 100 and 500 kHz.")
-
-    def _select_num_modules(self) -> None:
-        """Interactively select number of modules."""
-        # CLI override
-        if self.args.num_modules is not None:
-            self.num_modules = self.args.num_modules
-            return
-
-        while True:
-            choice = input(f"Select number of modules {list(NUM_MODULES)}: ")
-            if choice.isdigit() and int(choice) in NUM_MODULES:
-                self.num_modules = int(choice)
-                break
-            self.logger.info("Invalid selection. Please try again.")
-
 def main() -> None:
     """Main entry point for the script."""
 
