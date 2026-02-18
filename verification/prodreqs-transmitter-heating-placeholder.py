@@ -23,7 +23,7 @@ from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 from prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM_MODULES
 
-class transmitter_heating_placeholder(TestSonicationDurationBase):
+class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
     def __init__(self, args):
         super().__init__(args)
         self.args = args
@@ -33,7 +33,7 @@ def main() -> None:
     """Main entry point for the script."""
 
     args = parse_arguments()
-    temp_and_voltage_stability_test = transmitter_heating_placeholder(args)
+    temp_and_voltage_stability_test = TransmitterHeatingPlaceholder(args)
 
     try:
         temp_and_voltage_stability_test.run()

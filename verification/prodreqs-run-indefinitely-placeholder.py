@@ -28,7 +28,7 @@ SELECTED_TEST_CASE_FOR_INDEFINITE_RUN = 10
 TEST_CASE_DURATION_SECONDS = 20 * 60
 TEST_CASE_COOLDOWN_SECONDS = 10 * 60
 
-class transmitter_indefinite_run(TestSonicationDurationBase):
+class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def __init__(self, args):
         super().__init__(args)
         self.args = args
@@ -237,7 +237,7 @@ def main() -> None:
     """Main entry point for the script."""
 
     args = parse_arguments()
-    temp_and_voltage_stability_test = transmitter_indefinite_run(args)
+    temp_and_voltage_stability_test = TransmitterIndefiniteRun(args)
 
     try:
         temp_and_voltage_stability_test.run()
