@@ -527,9 +527,7 @@ class TestSonicationDurationBase:
                             self.voltage,
                         )
 
-        while True:
-            if self.shutdown_event.is_set():
-                return
+        while not self.shutdown_event.is_set():
 
             time_elapsed = time.time() - start_time
 
@@ -537,6 +535,8 @@ class TestSonicationDurationBase:
             try:
                 if not self.use_external_power:
                     with self.mutex:
+                        if self.shutdown_event.is_set():
+                            return
                         console_voltage = self.interface.hvcontroller.get_voltage()
 
                         deviation_limit_percentage = self.voltage * VOLTAGE_DEVIATION_PERCENTAGE_LIMIT / 100
@@ -612,12 +612,9 @@ class TestSonicationDurationBase:
         prev_con_temp = None
 
         tx_temp = None
-        time_elapsed = 0.0
+        # time_elapsed = 0.0
 
-        while True:
-            if self.shutdown_event.is_set():
-                return
-
+        while not self.shutdown_event.is_set():
             time_elapsed = time.time() - start_time
 
             # Read temperatures
@@ -625,23 +622,35 @@ class TestSonicationDurationBase:
                 if not self.use_external_power:
                     if prev_con_temp is None:
                         with self.mutex:
+                            if self.shutdown_event.is_set():
+                                return
                             prev_con_temp = self.interface.hvcontroller.get_temperature1()
                     with self.mutex:
+                        if self.shutdown_event.is_set():
+                            return
                         con_temp = self.interface.hvcontroller.get_temperature1()
                 else:
                     con_temp = None
 
                 if prev_tx_temp is None:
                     with self.mutex:
+                        if self.shutdown_event.is_set():
+                            return
                         prev_tx_temp = self.interface.txdevice.get_temperature()
                 with self.mutex:
+                    if self.shutdown_event.is_set():
+                        return
                     tx_temp = self.interface.txdevice.get_temperature()
                     self.test_results[self.test_case_num].final_temperature = tx_temp
 
                 if prev_amb_temp is None:
                     with self.mutex:
+                        if self.shutdown_event.is_set():
+                            return
                         prev_amb_temp = self.interface.txdevice.get_ambient_temperature()
-                with self.mutex:    
+                with self.mutex:  
+                    if self.shutdown_event.is_set():
+                        return  
                     amb_temp = self.interface.txdevice.get_ambient_temperature()
 
             except SerialException as e:
@@ -696,6 +705,7 @@ class TestSonicationDurationBase:
                 break
 
             time.sleep(self.temperature_check_interval)
+        
         self.logger.warning("Temperature shutdown triggered.")
         self.shutdown_event.set()
         self.temperature_shutdown_event.set()
