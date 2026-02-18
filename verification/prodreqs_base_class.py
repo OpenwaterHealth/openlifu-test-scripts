@@ -990,9 +990,9 @@ class TestSonicationDurationBase:
                         self.logger.error("Error stopping trigger: %s", e)
 
                 # Wait for threads to exit gracefully
-                temp_thread.join(timeout=5.0)
-                voltage_thread.join(timeout=5.0)
-                completion_thread.join(timeout=5.0)
+                temp_thread.join()
+                voltage_thread.join()
+                completion_thread.join()
 
                 # Determine final status
                 if self.test_status not in ("aborted by user", "error"):
