@@ -17,6 +17,7 @@ import logging
 import sys
 import threading
 import time
+import inspect
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
@@ -43,7 +44,6 @@ Thermal Stress Test Script
 """
 
 __version__ = "1.0.3"
-TEST_ID = Path(__file__).name.replace(".py", "")
 REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
 REQUIRED_TX_FW_VERSION = "v2.0.3"
 
@@ -170,8 +170,9 @@ class TestSonicationDurationBase:
         # Logger
         self.logger = self._setup_logging()
         self._file_handler_attached = False
+        self.test_id = Path(inspect.getfile(type(self))).name.replace(".py", "")
 
-        self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
+        self.logger.debug(f"{self.test_id} initialized with arguments: {self.args}")
 
     def _setup_logging(self) -> logging.Logger:
         """Configure root logger with console output; file handler added later."""
@@ -210,7 +211,7 @@ class TestSonicationDurationBase:
 
             self.log_dir.mkdir(parents=True, exist_ok=True)
 
-            filename = f"{self.run_timestamp}_{TEST_ID}_{self.frequency_khz}kHz_{self.num_modules}x.log"
+            filename = f"{self.run_timestamp}_{self.test_id}_{self.frequency_khz}kHz_{self.num_modules}x.log"
 
             log_path = self.log_dir / filename
 
