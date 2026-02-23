@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Optional
 
 from serial.serialutil import SerialException
 
@@ -116,12 +117,32 @@ def calculate_temperature_discharge_time_seconds(final_temp_C: float) -> float:
 class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
 
-    def __init__(self, args):
-        self.args = args
+    def __init__(
+            self, 
+            frequency_khz: Optional[float] = None,
+            num_modules: Optional[int] = None,
+            external_power: bool = False,
+            simulate: bool = False,
+            test_runthrough: bool = False,
+            console_shutoff_temp: float = CONSOLE_SHUTOFF_TEMP_C_DEFAULT,
+            tx_shutoff_temp: float = TX_SHUTOFF_TEMP_C_DEFAULT,
+            ambient_shutoff_temp: float = AMBIENT_SHUTOFF_TEMP_C_DEFAULT,
+            temperature_check_interval: float = TEMPERATURE_CHECK_INTERVAL_DEFAULT,
+            temperature_log_interval: float = TEMPERATURE_LOG_INTERVAL_DEFAULT,
+            log_dir: Optional[str] = None,
+            verbose: bool = False,
+            quiet: bool = False,
+            skip_logfile: bool = False,
+            bypass_console_fw: bool = False,
+            bypass_tx_fw: bool = False,
+            test_case: Optional[int] = None,
+    ):
+            # args):
+        # self.args = args
 
         # Derived paths
         self.openlifu_dir = Path(openlifu.__file__).parent.parent.parent.resolve()
-        self.log_dir = Path(self.args.log_dir or (Path(__file__).resolve().parents[1] / "logs"))
+        self.log_dir = Path(log_dir or (Path(__file__).resolve().parents[1] / "logs"))
         
         # Runtime attributes
         self.interface: LIFUInterface | None = None
@@ -141,12 +162,12 @@ class TestSonicationDurationBase:
         self.start_time: float | None = None
 
         # Test configuration – set later via interactive selection
-        self.frequency_khz: float | None = None
+        self.frequency_khz = frequency_khz
         self.test_case_num: int | None = None
         self.voltage: float | None = None
         self.interval_msec: float | None = None
         self.duration_msec: int | None = None
-        self.num_modules: int | None = None
+        self.num_modules = num_modules
 
         self.test_status: str | None = "not started"
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
@@ -154,33 +175,36 @@ class TestSonicationDurationBase:
         self.test_results: dict[int, TestCaseResult] = {}
 
         # Flags from args
-        self.use_external_power = self.args.external_power
-        self.hw_simulate = self.args.simulate
-        self.test_runthrough = self.args.test_runthrough
-        self.bypass_console_fw = self.args.bypass_console_fw
-        self.bypass_tx_fw = self.args.bypass_tx_fw
+        self.use_external_power = external_power
+        self.hw_simulate = simulate
+        self.test_runthrough = test_runthrough
+        self.bypass_console_fw = bypass_console_fw
+        self.bypass_tx_fw = bypass_tx_fw
 
         # Safety parameters from args
-        self.console_shutoff_temp_C = self.args.console_shutoff_temp
-        self.tx_shutoff_temp_C = self.args.tx_shutoff_temp
-        self.ambient_shutoff_temp_C = self.args.ambient_shutoff_temp
-        self.temperature_check_interval = self.args.temperature_check_interval
-        self.temperature_log_interval = self.args.temperature_log_interval
+        self.console_shutoff_temp_C = console_shutoff_temp
+        self.tx_shutoff_temp_C = tx_shutoff_temp
+        self.ambient_shutoff_temp_C = ambient_shutoff_temp
+        self.temperature_check_interval = temperature_check_interval
+        self.temperature_log_interval = temperature_log_interval
 
         # Logger
-        self.logger = self._setup_logging()
         self._file_handler_attached = False
+        self.verbose = verbose
+        self.quiet = quiet
+        self.skip_logfile = skip_logfile
+        self.logger = self._setup_logging()
 
-        self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
+        # self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
 
     def _setup_logging(self) -> logging.Logger:
         """Configure root logger with console output; file handler added later."""
         logger = logging.getLogger(__name__)
 
         # Set log level based on verbosity
-        if self.args.verbose:
+        if self.verbose:
             logger.setLevel(logging.DEBUG)
-        elif self.args.quiet:
+        elif self.quiet:
             logger.setLevel(logging.WARNING)
         else:
             logger.setLevel(logging.INFO)
@@ -204,7 +228,7 @@ class TestSonicationDurationBase:
     ###### going to be different for each test, may want to move to child class ######
     def _attach_file_handler(self) -> None:
         """Attach a file handler for this run once test case is known."""
-        if not self.args.skip_logfile:
+        if not self.skip_logfile:
             if self._file_handler_attached:
                 return
 
@@ -235,8 +259,8 @@ class TestSonicationDurationBase:
     def _select_frequency(self) -> None:
         """Select TX frequency in kHz (100–500), CLI override or interactive."""
         # CLI override
-        if self.args.frequency is not None:
-            self.frequency_khz = self.args.frequency
+        if self.frequency_khz is not None:
+            # self.frequency_khz = self.frequency
             return
 
         while True:
@@ -256,8 +280,8 @@ class TestSonicationDurationBase:
     def _select_num_modules(self) -> None:
         """Interactively select number of modules."""
         # CLI override
-        if self.args.num_modules is not None:
-            self.num_modules = self.args.num_modules
+        if self.num_modules is not None:
+            # self.num_modules = self.args.num_modules
             return
 
         while True:
@@ -272,8 +296,8 @@ class TestSonicationDurationBase:
         valid_test_nums = list(range(1, len(TEST_CASES) + 1))
 
         # Test case selection
-        if self.args.test_case is not None:
-            self.starting_test_case = int(self.args.test_case)
+        if self.test_case is not None:
+            self.starting_test_case = int(self.test_case)
         else:
             self.logger.info("\nAvailable Test Cases:")
             for test_id, test_case in enumerate(TEST_CASES, start=1):
@@ -356,7 +380,7 @@ class TestSonicationDurationBase:
             return False
 
         try:
-            if not self.args.external_power and not self.interface.hvcontroller.ping():
+            if not self.external_power and not self.interface.hvcontroller.ping():
                 self.logger.error("Failed to ping the console device.")
         except Exception as e:
             self.logger.error("Console Communication verification failed: %s", e)
@@ -383,10 +407,10 @@ class TestSonicationDurationBase:
         tx_fw_mismatch = False
         
         try:
-            if not self.args.external_power:
+            if not self.external_power:
                 console_fw = self.interface.hvcontroller.get_version()
                 self.logger.info("Console Firmware Version: %s", console_fw)
-            if not self.args.bypass_console_fw and console_fw != REQUIRED_CONSOLE_FW_VERSION:
+            if not self.bypass_console_fw and console_fw != REQUIRED_CONSOLE_FW_VERSION:
                 self.logger.error("Console firmware version %s does not match required version %s.",
                                 console_fw, REQUIRED_CONSOLE_FW_VERSION)
                 console_fw_mismatch = True
@@ -398,7 +422,7 @@ class TestSonicationDurationBase:
                 for i in range(1, self.num_modules+1):
                     tx_fw = self.interface.txdevice.get_version(module=i)
                     self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
-                    if not self.args.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
+                    if not self.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
                         self.logger.error("TX firmware version %s does not match required version %s.",
                                         tx_fw, REQUIRED_TX_FW_VERSION)
                         tx_fw_mismatch = True
