@@ -49,15 +49,15 @@ REQUIRED_TX_FW_VERSION = "v2.0.3"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
-    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 50, "duty_cycle": 20, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 45, "duty_cycle": 25, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 40, "duty_cycle": 30, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 200, "max_starting_temperature": 30},
-    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 200, "max_starting_temperature": 30},
+    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 50, "duty_cycle": 20, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 45, "duty_cycle": 25, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 40, "duty_cycle": 30, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 200, "max_starting_temperature": 32},
     {"voltage": 20, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
     {"voltage": 15, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
     {"voltage": 10, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
@@ -133,6 +133,7 @@ class TestSonicationDurationBase:
         self.interval_msec: float | None = None
         self.duration_msec: int | None = None
         self.num_modules: int | None = None
+        self.max_allowed_voltage_deviation_percentage: float | None = None
 
         self.test_status: str | None = "not started"
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
@@ -501,13 +502,13 @@ class TestSonicationDurationBase:
         start_time = time.time()
         last_log_time = 0.0
 
-        deviation_limit_percentage = self.voltage * VOLTAGE_DEVIATION_PERCENTAGE_LIMIT / 100
+        deviation_limit_percentage = self.voltage * self.max_allowed_voltage_deviation_percentage / 100
         deviation_limit_absolute_value = VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT
         deviation_limit_v = max(deviation_limit_percentage, deviation_limit_absolute_value)
         
         self.logger.info("  Voltage Deviation Limits: %.2f V (max of %.2f%% of %.2fV (%.2fV) or %.1f V) from expected %.2f V.",
                             deviation_limit_v,
-                            VOLTAGE_DEVIATION_PERCENTAGE_LIMIT,
+                            self.max_allowed_voltage_deviation_percentage,
                             self.voltage,
                             deviation_limit_percentage,
                             deviation_limit_absolute_value,
@@ -526,7 +527,7 @@ class TestSonicationDurationBase:
                             return
                         console_voltage = self.interface.hvcontroller.get_voltage()
 
-                        deviation_limit_percentage = self.voltage * VOLTAGE_DEVIATION_PERCENTAGE_LIMIT / 100
+                        deviation_limit_percentage = self.voltage * self.max_allowed_voltage_deviation_percentage / 100
                         deviation_limit_absolute_value = VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT
                         deviation_limit_v = max(deviation_limit_percentage, deviation_limit_absolute_value)
 
@@ -547,7 +548,7 @@ class TestSonicationDurationBase:
                                 deviation_pct,
                                 delta_v,
                                 deviation_limit_v,
-                                VOLTAGE_DEVIATION_PERCENTAGE_LIMIT,
+                                self.max_allowed_voltage_deviation_percentage,
                                 deviation_limit_absolute_value,
                                 self.voltage,
                             )
@@ -807,11 +808,12 @@ class TestSonicationDurationBase:
             + "\n\nThe script will account for cooldown periods as needed between test cases. \n" \
             f"Each test case will run for {self.sequence_duration/60:.2f} minutes. \n"
             f"The lower voltage tests starting at {LOW_VOLTAGE_VALUE}V and below will run for {LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS} seconds. \n"
+            f"Maximum allowed console voltage deviation is {self.max_allowed_voltage_deviation_percentage:.2f}% or {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:.2f}V, whichever is greater.\n"
             f"The temperature shutoff limits are: \n"
             f"  Console: {self.console_shutoff_temp_C:>3}C"
             f"  TX Device: {self.tx_shutoff_temp_C:>3}C" 
             f"  Ambient: {self.ambient_shutoff_temp_C:>3}C \n"
-            "Approximate test duration is 24hrs.\n"
+            "Approximate test duration is <24hrs.\n"
         )
         self.logger.info("--------------------------------------------------------------------------------\n\n\n")
 
@@ -839,7 +841,7 @@ class TestSonicationDurationBase:
                 f"Cooldown Time: {cooldown:>5}, "
                 f"Actual Start Temp: {act_start:>6}, "
                 f"Final Temp: {final:>6}, "
-                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({VOLTAGE_DEVIATION_PERCENTAGE_LIMIT:>3}%), "
+                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({self.max_allowed_voltage_deviation_percentage:>3}%), "
                 f"Actual Voltage Deviation: {max_dv:>5} ({max_dv_pct:>5}) "
                 f"Duration Run: {dur:>5}  --> "
                 f"{status}" + ("\n" if test_case == len(TEST_CASES) / 2 else "")

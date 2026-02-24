@@ -81,7 +81,7 @@ TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS = 5 * 60
 LOW_VOLTAGE_VALUE = 20
 LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS = 60
 
-VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS = 60
+VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS = 5
 TEST_RUNTHROUGH_TEMPERATURE_BYPASS_C = 60.0
 
 SHORT_TEST_DURATION_SECONDS = 60
@@ -136,7 +136,8 @@ def calculate_temperature_discharge_time_seconds(final_temp_C: float) -> float:
     return 60.0*minutes # temp value until formula figured out
 '''
 
-class TestSonicationDuration:
+
+class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
 
     def __init__(self, args):
@@ -157,6 +158,7 @@ class TestSonicationDuration:
         self.mutex = threading.Lock()
 
         self.stop_logging = False
+        # self.voltage_accuracy_test = True
 
         self.run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.start_time: float | None = None
@@ -287,7 +289,6 @@ class TestSonicationDuration:
             self.logger.info("Invalid selection. Please try again.")
 
     def _select_starting_test_case(self) -> None:
-
         valid_test_nums = list(range(1, len(TEST_CASES) + 1))
 
         # Test case selection
@@ -495,18 +496,21 @@ class TestSonicationDuration:
 
         self.logger.info("Solution configured for Test Case %s.", self.test_case_num)
 
-    def test_console_voltage_accuracy_no_load(self) -> None:
-        """Test console voltage accuracy under no-load conditions."""
-        if self.interface is None:
-            self.logger.error("Interface not connected for voltage accuracy test.")
-            return
+    # def test_console_voltage_accuracy_no_load(self) -> None:
+    #     """Test console voltage accuracy under no-load conditions."""
+    #     if self.interface is None:
+    #         self.logger.error("Interface not connected for voltage accuracy test.")
+    #         return
 
-        try:
-            self.interface.hvcontroller.turn_hv_on()
-        except SerialException as e:
-            self.logger.error("SerialException encountered while reading console voltage: %s", e)
-        except Exception as e:
-            self.logger.error("Unexpected error while reading console voltage: %s", e)
+    #     for test_case in range(0, len(TEST_CASES)//2):  # Run for 2 test cases as a quick check
+    #         self.logger.info(f"Starting console voltage accuracy test for Test Case {test_case} with no load for {VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS} seconds.")
+    #         try:
+    #             self.interface.hvcontroller.set_voltage(self.voltage)
+    #             self.interface.hvcontroller.turn_hv_on()
+    #         except SerialException as e:
+    #             self.logger.error("SerialException encountered while reading console voltage: %s", e)
+    #         except Exception as e:
+    #             self.logger.error("Unexpected error while reading console voltage: %s", e)
 
     def monitor_console_voltage(self) -> None:
         """Thread target: monitor console voltage."""
@@ -1048,6 +1052,12 @@ class TestSonicationDuration:
 
         self.print_test_summary()    
 
+
+
+class TransmitterHeatingAndVoltageStabilityTest(TestSonicationDurationBase):
+    def __init__(self, args):
+        super().__init__(args)
+
 @dataclass
 class TestCaseResult:
     # self.test_case : int | None = None
@@ -1246,28 +1256,33 @@ Examples:
 def main() -> None:
     """Main entry point for the script."""
     args = parse_arguments()
-    test = TestSonicationDuration(args)
+    voltage_test = VoltageAccuracyTest(args)
+    temp_and_voltage_stability_test = TransmitterHeatingAndVoltageStabilityTest(args)
 
     try:
-        test.run()
+        voltage_test.run()
+        temp_and_voltage_stability_test.run()
     except KeyboardInterrupt:
-        test.logger.info("\nUser interrupted. Shutting down...")
-        test.shutdown_event.set()
-        test.stop_logging = True
-        time.sleep(0.5)
-        with contextlib.suppress(Exception):
-            test.print_test_summary()
-            test.turn_off_console_and_tx()
-        with contextlib.suppress(Exception):
-            test.cleanup_interface()
+        for test in (voltage_test, temp_and_voltage_stability_test):
+            test.logger.warning("Test aborted by user KeyboardInterrupt. Shutting down...")
+            test.shutdown_event.set()
+            test.stop_logging = True
+            time.sleep(0.5)
+            with contextlib.suppress(Exception):
+                test.print_test_summary()
+                test.turn_off_console_and_tx()
+            with contextlib.suppress(Exception):
+                test.cleanup_interface()
         sys.exit(0)
     except Exception as e:
         test.logger.error(f"\nFatal error: {e}")
-        test.print_test_summary()
-        with contextlib.suppress(Exception):
-            test.turn_off_console_and_tx()
-        with contextlib.suppress(Exception):
-            test.cleanup_interface()
+        for test in (voltage_test, temp_and_voltage_stability_test):
+            with contextlib.suppress(Exception):
+                test.print_test_summary()
+            with contextlib.suppress(Exception):
+                test.turn_off_console_and_tx()
+            with contextlib.suppress(Exception):
+                test.cleanup_interface()
         sys.exit(1)
 
 

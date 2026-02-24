@@ -27,7 +27,7 @@ from config import *
 # config.py
 TEST_VOLTAGES = [65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
 MAX_PERCENT_VOLTAGE_DEVIATION = 2.0
-SEQUENCE_DURATION_SECONDS = 5
+SEQUENCE_DURATION_SECONDS = 60
 
 class VoltageAccuracyTest(TestSonicationDurationBase):
     """Data class to hold voltage accuracy test results."""
@@ -39,6 +39,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.test_time_elapsed: float | None = None
         self.sequence_duration: float = SEQUENCE_DURATION_SECONDS
         self.bypass_transmitter = True  # For voltage accuracy test, we can bypass TX communication
+        self.max_allowed_voltage_deviation_percentage = MAX_PERCENT_VOLTAGE_DEVIATION
 
     def _select_starting_test_case(self) -> None:
         valid_test_nums = list(range(1, len(TEST_VOLTAGES) + 1))
@@ -49,7 +50,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         else:
             self.logger.info("\nAvailable Test Cases:")
             for test_id, voltage in enumerate(TEST_VOLTAGES, start=1):
-                self.logger.info(f"Test Case {test_id}. {voltage}V")
+                self.logger.info(f"Test Case {test_id:>2}. {voltage:>2}V")
 
             while True:
                 choice = input(
@@ -241,9 +242,9 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 for i, tc in enumerate(TEST_VOLTAGES[self.starting_test_case-1:], start=self.starting_test_case)
             )
             + "\n\nThe script will account for cooldown periods as needed between test cases. \n" \
-            f"Each test case will run for {self.sequence_duration/60:.2f} minutes. \n"
-            f"The lower voltage tests starting at {LOW_VOLTAGE_VALUE}V and below will run for {LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS} seconds. \n"
-            "Approximate test duration is 24hrs.\n"
+            f"Each test case will run for {self.sequence_duration/60:.2f} minute. \n"
+            f"Maximum allowed console voltage deviation is {self.max_allowed_voltage_deviation_percentage:.2f}% or {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:.2f}V, whichever is greater.\n"
+            f"Approximate test duration is {self.sequence_duration*len(TEST_VOLTAGES)/60:.2f} minutes.\n"
         )
         self.logger.info("--------------------------------------------------------------------------------\n\n\n")
 

@@ -24,9 +24,12 @@ from openlifu.plan.solution import Solution
 from prodreqs_base_class import *
 from config import *
 
-SELECTED_TEST_CASE_FOR_INDEFINITE_RUN = 10
+SELECTED_TEST_CASE_FOR_INDEFINITE_RUN = 1
 TEST_CASE_DURATION_SECONDS = 20 * 60
 TEST_CASE_COOLDOWN_SECONDS = 10 * 60
+MAX_PERCENT_VOLTAGE_DEVIATION = 10.0
+
+CUSTOM_TEST_CASE = {"voltage": 20, "duty_cycle": 5, "PRI_ms": 200, "max_starting_temperature": 32}
 
 class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def __init__(self, args):
@@ -35,11 +38,12 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
         self.logger = self._setup_logging()
         self.sequence_duration = TEST_CASE_DURATION_SECONDS
         self.test_case = SELECTED_TEST_CASE_FOR_INDEFINITE_RUN
+        self.max_allowed_voltage_deviation_percentage = MAX_PERCENT_VOLTAGE_DEVIATION
 
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
         self.logger.info("Number of modules: %d", self.num_modules)
-        test_case_parameters = TEST_CASES[self.test_case]
+        test_case_parameters = CUSTOM_TEST_CASE
 
         self.logger.info("--------------------------------------------------------------------------------")
         self.logger.info(
@@ -72,7 +76,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
         # for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
 
         self.test_case_num = self.test_case
-        test_case_parameters = TEST_CASES[self.test_case_num-1]
+        test_case_parameters = CUSTOM_TEST_CASE
 
         self.test_results[self.test_case_num] = TestCaseResult()
         self.voltage = float(test_case_parameters["voltage"])

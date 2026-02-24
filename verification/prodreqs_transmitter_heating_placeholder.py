@@ -23,11 +23,14 @@ from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 from prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM_MODULES
 
+MAX_PERCENT_VOLTAGE_DEVIATION = 10.0
+
 class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
     def __init__(self, args):
         super().__init__(args)
         self.args = args
         self.logger = self._setup_logging()
+        self.max_allowed_voltage_deviation_percentage = MAX_PERCENT_VOLTAGE_DEVIATION
 
 def main() -> None:
     """Main entry point for the script."""
