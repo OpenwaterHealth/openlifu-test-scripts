@@ -430,7 +430,7 @@ class TestSonicationDurationBase:
             roc0 = 100
             dth = get_angle_from_gap(40, gap0, roc0)
             gap = 12.9
-            transducers= TransducerArray.get_concave_cylinder(trans=trans0, rows=1, cols=3, width=40, dth=dth, roc=None, gap=gap)
+            transducers= TransducerArray.get_concave_cylinder(trans=trans0, rows=1, cols=2, width=40, dth=dth, roc=None, gap=gap)
             arr = transducers.to_transducer()
         
         # Focus at (0, 0, 50 mm)
