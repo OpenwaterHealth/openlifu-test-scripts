@@ -1,0 +1,8 @@
+numpy
+pandas
+pyserial
+matplotlib
+xarray[io]
+scipy
+crc
+crcmod

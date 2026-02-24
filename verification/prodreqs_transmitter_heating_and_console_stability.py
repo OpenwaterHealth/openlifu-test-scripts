@@ -13,14 +13,6 @@ from dataclasses import dataclass
 from serial.serialutil import SerialException
 
 import numpy as np
-
-import openlifu
-from openlifu.bf.pulse import Pulse
-from openlifu.bf.sequence import Sequence
-from openlifu.db import Database
-from openlifu.geo import Point
-from openlifu.io.LIFUInterface import LIFUInterface
-from openlifu.plan.solution import Solution
 from prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM_MODULES
 
 MAX_PERCENT_VOLTAGE_DEVIATION = 10.0

@@ -29,12 +29,14 @@ import numpy as np
 import openlifu
 from openlifu.bf.pulse import Pulse
 from openlifu.bf.sequence import Sequence
-from openlifu.db import Database
+from openlifu.xdc import Transducer, TransducerArray
+from openlifu.xdc.transducerarray import get_angle_from_gap
 from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 
 from config import *
+from openlifu.xdc.transducer import Transducer
 
 """
 Thermal Stress Test Script
@@ -418,11 +420,19 @@ class TestSonicationDurationBase:
         if self.interface is None:
             raise RuntimeError("Interface not connected.")
 
-        db_path = self.openlifu_dir / "db_dvc"
-        db = Database(db_path)
-        arr = db.load_transducer(f"openlifu_{self.num_modules}x400_evt1")
-        arr.sort_by_pin()
+        trans0_id = "openlifu_1x400_evt1"
+        trans0 = Transducer.gen_matrix_array(nx=8, ny=8, pitch=5, kerf=0.3, id=trans0_id, name="OpenLIFU 1x 400kHz EVT1")
 
+        if self.num_modules == 1:
+            arr=trans0
+        elif self.num_modules == 2:
+            gap0 = 10
+            roc0 = 100
+            dth = get_angle_from_gap(40, gap0, roc0)
+            gap = 12.9
+            transducers= TransducerArray.get_concave_cylinder(trans=trans0, rows=1, cols=3, width=40, dth=dth, roc=None, gap=gap)
+            arr = transducers.to_transducer()
+        
         # Focus at (0, 0, 50 mm)
         x_input, y_input, z_input = 0, 0, 50
         target = Point(position=(x_input, y_input, z_input), units="mm")
