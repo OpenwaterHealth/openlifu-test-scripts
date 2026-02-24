@@ -49,20 +49,6 @@ REQUIRED_TX_FW_VERSION = "v2.0.3"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
-    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 50, "duty_cycle": 20, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 45, "duty_cycle": 25, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 40, "duty_cycle": 30, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 20, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 15, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 10, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 5,  "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-
     {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": 30},
     {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": 30},
     {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": 30},
@@ -279,8 +265,8 @@ class TestSonicationDurationBase:
             self.logger.info("\nAvailable Test Cases:")
             for test_id, test_case in enumerate(TEST_CASES, start=1):
                 self.logger.info(
-                    f"Test Case {test_id}. {test_case['voltage']}V, "
-                    f"{test_case['duty_cycle']}% Duty Cycle, total"
+                    f"Test Case {test_id:>2}. {test_case['voltage']:>2}V, "
+                    f"{test_case['duty_cycle']:>2}% Duty Cycle, total"
                 )
 
             while True:
@@ -821,6 +807,10 @@ class TestSonicationDurationBase:
             + "\n\nThe script will account for cooldown periods as needed between test cases. \n" \
             f"Each test case will run for {self.sequence_duration/60:.2f} minutes. \n"
             f"The lower voltage tests starting at {LOW_VOLTAGE_VALUE}V and below will run for {LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS} seconds. \n"
+            f"The temperature shutoff limits are: \n"
+            f"  Console: {self.console_shutoff_temp_C:>3}C"
+            f"  TX Device: {self.tx_shutoff_temp_C:>3}C" 
+            f"  Ambient: {self.ambient_shutoff_temp_C:>3}C \n"
             "Approximate test duration is 24hrs.\n"
         )
         self.logger.info("--------------------------------------------------------------------------------\n\n\n")
