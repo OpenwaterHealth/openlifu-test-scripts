@@ -116,7 +116,6 @@ def calculate_temperature_discharge_time_seconds(final_temp_C: float) -> float:
 
 class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
-
     def __init__(
             self, 
             frequency_khz: Optional[float] = None,
@@ -136,7 +135,7 @@ class TestSonicationDurationBase:
             bypass_console_fw: bool = False,
             bypass_tx_fw: bool = False,
             test_case: Optional[int] = None,
-    ):
+    ) -> None:
             # args):
         # self.args = args
 
@@ -171,7 +170,7 @@ class TestSonicationDurationBase:
 
         self.test_status: str | None = "not started"
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
-        self.starting_test_case: int = 1
+        self.starting_test_case: int = test_case
         self.test_results: dict[int, TestCaseResult] = {}
 
         # Flags from args
@@ -296,8 +295,8 @@ class TestSonicationDurationBase:
         valid_test_nums = list(range(1, len(TEST_CASES) + 1))
 
         # Test case selection
-        if self.test_case is not None:
-            self.starting_test_case = int(self.test_case)
+        if self.starting_test_case is not None:
+            return
         else:
             self.logger.info("\nAvailable Test Cases:")
             for test_id, test_case in enumerate(TEST_CASES, start=1):

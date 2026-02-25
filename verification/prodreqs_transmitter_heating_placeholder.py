@@ -25,7 +25,26 @@ from prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM
 
 class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
     def __init__(self, args):
-        super().__init__(args)
+        print(vars(args))
+        super().__init__(
+            frequency_khz=args.frequency,
+            num_modules=args.num_modules,
+            external_power=args.external_power,
+            simulate=args.simulate,
+            test_runthrough=args.test_runthrough,
+            console_shutoff_temp=args.console_shutoff_temp,
+            tx_shutoff_temp=args.tx_shutoff_temp,
+            ambient_shutoff_temp=args.ambient_shutoff_temp,
+            temperature_check_interval=args.temperature_check_interval,
+            temperature_log_interval=args.temperature_log_interval,
+            log_dir=args.log_dir,
+            verbose=args.verbose,
+            quiet=args.quiet,
+            skip_logfile=args.skip_logfile,
+            bypass_console_fw=args.bypass_console_fw,
+            bypass_tx_fw=args.bypass_tx_fw,
+            test_case=args.test_case
+        )
         self.args = args
         self.logger = self._setup_logging()
 
