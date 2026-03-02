@@ -308,6 +308,7 @@ class TestSonicationDurationBase:
             while True:
                 choice = input(f"Press enter to run through all test cases or select a test case by number to start at: ")
                 if choice == "":
+                    self.starting_test_case = 1
                     break
                 if choice.isdigit() and int(choice) in valid_test_nums:
                     self.starting_test_case = int(choice)
@@ -379,7 +380,7 @@ class TestSonicationDurationBase:
             return False
 
         try:
-            if not self.external_power and not self.interface.hvcontroller.ping():
+            if not self.use_external_power and not self.interface.hvcontroller.ping():
                 self.logger.error("Failed to ping the console device.")
         except Exception as e:
             self.logger.error("Console Communication verification failed: %s", e)
@@ -406,7 +407,7 @@ class TestSonicationDurationBase:
         tx_fw_mismatch = False
         
         try:
-            if not self.external_power:
+            if not self.use_external_power:
                 console_fw = self.interface.hvcontroller.get_version()
                 self.logger.info("Console Firmware Version: %s", console_fw)
             if not self.bypass_console_fw and console_fw != REQUIRED_CONSOLE_FW_VERSION:
@@ -837,7 +838,6 @@ class TestSonicationDurationBase:
                 f"{tc['duty_cycle']:>3}% Duty Cycle, "
                 f"{tc['PRI_ms']:>4}ms PRI, "
                 f"Max Starting Temperature: {tc['max_starting_temperature']:>3}C"
-                + ("\n" if i == len(TEST_CASES)/2 else "")
                 for i, tc in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case)
             )
             + "\n\nThe script will account for cooldown periods as needed between test cases. \n" \
