@@ -21,8 +21,8 @@ from openlifu.db import Database
 from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
-from prodreqs_base_class import *
-from config import *
+from .prodreqs_base_class import *
+from .config import *
 
 # config.py
 TEST_VOLTAGES = [65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
@@ -92,7 +92,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
 
             try:
                 if not self.hw_simulate:
-                    self.connect_device()
+                    # self.connect_device()
                     self.verify_communication()
 
                     # if test has already run at least once, skip

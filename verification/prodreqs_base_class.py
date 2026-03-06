@@ -34,7 +34,7 @@ from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 
-from config import *
+from .config import *
 
 """
 Thermal Stress Test Script
@@ -135,6 +135,7 @@ class TestSonicationDurationBase:
             bypass_console_fw: bool = False,
             bypass_tx_fw: bool = False,
             test_case: Optional[int] = None,
+            interface: Optional[LIFUInterface] = None
     ) -> None:
             # args):
         # self.args = args
@@ -144,7 +145,10 @@ class TestSonicationDurationBase:
         self.log_dir = Path(log_dir or (Path(__file__).resolve().parents[1] / "logs"))
         
         # Runtime attributes
-        self.interface: LIFUInterface | None = None
+        if interface is not None:
+            self.interface = interface
+        else:
+            self.interface: LIFUInterface | None = None
         self.shutdown_event = threading.Event()
         self.sequence_complete_event = threading.Event()
         self.temperature_shutdown_event = threading.Event()
@@ -317,7 +321,11 @@ class TestSonicationDurationBase:
 
     def connect_device(self) -> None:
         """Connect to the LIFU device and verify connection."""
-        self.logger.info("Starting test...")
+        self.logger.info("Connecting Device...")
+
+        if self.interface is not None:
+            self.logger.info("Using provided LIFUInterface instance.")
+            return
         self.interface = LIFUInterface(
             ext_power_supply=self.use_external_power,
             TX_test_mode=self.hw_simulate,

@@ -21,7 +21,7 @@ from openlifu.db import Database
 from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
-from prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM_MODULES
+from .prodreqs_base_class import TestSonicationDurationBase, parse_arguments, NUM_MODULES
 
 class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
     def __init__(self, args):
@@ -43,7 +43,8 @@ class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
             skip_logfile=args.skip_logfile,
             bypass_console_fw=args.bypass_console_fw,
             bypass_tx_fw=args.bypass_tx_fw,
-            test_case=args.test_case
+            test_case=args.test_case,
+            interface=args.interface
         )
         self.args = args
         self.logger = self._setup_logging()
