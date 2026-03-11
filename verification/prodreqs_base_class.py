@@ -147,8 +147,7 @@ class TestSonicationDurationBase:
         # Runtime attributes
         if interface is not None:
             self.interface = interface
-        else:
-            self.interface: LIFUInterface | None = None
+
         self.shutdown_event = threading.Event()
         self.sequence_complete_event = threading.Event()
         self.temperature_shutdown_event = threading.Event()
@@ -325,6 +324,7 @@ class TestSonicationDurationBase:
 
         if self.interface is not None:
             self.logger.info("Using provided LIFUInterface instance.")
+            self.interface.hvcontroller.turn_12v_on()
             return
         self.interface = LIFUInterface(
             ext_power_supply=self.use_external_power,
@@ -827,11 +827,13 @@ class TestSonicationDurationBase:
             with contextlib.suppress(Exception):
                 self.interface.stop_monitoring()
             time.sleep(0.2)
-            del self.interface
+            print("bypassing del interface in cleanup_interface")
+            # del self.interface
         except Exception as e:
             self.logger.warning("Issue closing LIFU interface: %s", e)
         finally:
-            self.interface = None
+            print("finally block in cleanup_interface, skipping setting interface to None")
+            # self.interface = None
 
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
