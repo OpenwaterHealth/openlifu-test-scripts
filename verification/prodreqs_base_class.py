@@ -26,13 +26,13 @@ from serial.serialutil import SerialException
 
 import numpy as np
 
-import openlifu
 from openlifu.bf.pulse import Pulse
 from openlifu.bf.sequence import Sequence
 from openlifu.xdc import Transducer, TransducerArray
 from openlifu.xdc.transducerarray import get_angle_from_gap
 from openlifu.geo import Point
-from openlifu.io.LIFUInterface import LIFUInterface
+from openlifu_sdk import LIFUInterface
+import openlifu_sdk
 from openlifu.plan.solution import Solution
 
 from config import *
@@ -45,9 +45,9 @@ Thermal Stress Test Script
 - Logs temperature and device status.
 """
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
-REQUIRED_TX_FW_VERSION = "v2.0.3"
+REQUIRED_TX_FW_VERSION = "2.0.4"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
@@ -108,7 +108,7 @@ class TestSonicationDurationBase:
         self.args = args
 
         # Derived paths
-        self.openlifu_dir = Path(openlifu.__file__).parent.parent.parent.resolve()
+        self.openlifu_dir = Path(openlifu_sdk.__file__).parent.parent.parent.resolve()
         self.log_dir = Path(self.args.log_dir or (Path(__file__).resolve().parents[1] / "logs"))
         
         # Runtime attributes
@@ -385,7 +385,7 @@ class TestSonicationDurationBase:
 
         if not self.bypass_transmitter:        
             try:
-                for i in range(1, self.num_modules+1):
+                for i in range(self.num_modules):
                     tx_fw = self.interface.txdevice.get_version(module=i)
                     self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
                     if not self.args.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
