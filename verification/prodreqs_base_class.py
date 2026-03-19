@@ -31,8 +31,10 @@ from openlifu.bf.sequence import Sequence
 from openlifu.xdc import Transducer, TransducerArray
 from openlifu.xdc.transducerarray import get_angle_from_gap
 from openlifu.geo import Point
-from openlifu_sdk import LIFUInterface
+
 import openlifu_sdk
+from openlifu_sdk import LIFUInterface
+
 from openlifu.plan.solution import Solution
 
 from config import *
@@ -45,7 +47,7 @@ Thermal Stress Test Script
 - Logs temperature and device status.
 """
 
-__version__ = "1.0.4"
+__version__ = "1.0.3"
 REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
 REQUIRED_TX_FW_VERSION = "2.0.4"
 
