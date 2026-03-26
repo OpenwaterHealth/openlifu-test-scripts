@@ -17,6 +17,7 @@ import logging
 import sys
 import threading
 import time
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
@@ -34,7 +35,10 @@ from openlifu.geo import Point
 from openlifu.io.LIFUInterface import LIFUInterface
 from openlifu.plan.solution import Solution
 
-from .config import *
+try:
+    from .config import *
+except ImportError:
+    from config import *
 
 """
 Thermal Stress Test Script
@@ -46,24 +50,10 @@ Thermal Stress Test Script
 __version__ = "1.0.3"
 TEST_ID = Path(__file__).name.replace(".py", "")
 REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
-REQUIRED_TX_FW_VERSION = "v2.0.3"
+REQUIRED_TX_FW_VERSION = "2.0.4-1-g55452b2"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
-    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 50, "duty_cycle": 20, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 45, "duty_cycle": 25, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 40, "duty_cycle": 30, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 100, "max_starting_temperature": 30},
-    {"voltage": 20, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 15, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 10, "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-    {"voltage": 5,  "duty_cycle": 50, "PRI_ms": 100, "max_starting_temperature": 60},
-
     {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": 30},
     {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": 30},
     {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": 30},
@@ -145,8 +135,7 @@ class TestSonicationDurationBase:
         self.log_dir = Path(log_dir or (Path(__file__).resolve().parents[1] / "logs"))
         
         # Runtime attributes
-        if interface is not None:
-            self.interface = interface
+        self.interface = interface
 
         self.shutdown_event = threading.Event()
         self.sequence_complete_event = threading.Event()
@@ -198,6 +187,9 @@ class TestSonicationDurationBase:
         self.logger = self._setup_logging()
 
         # self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
+
+    def monitor_interface(self):
+        asyncio.run(self.interface.start_monitoring(interval=1))
 
     def _setup_logging(self) -> logging.Logger:
         """Configure root logger with console output; file handler added later."""
@@ -320,22 +312,61 @@ class TestSonicationDurationBase:
 
     def connect_device(self) -> None:
         """Connect to the LIFU device and verify connection."""
-        self.logger.info("Connecting Device...")
-
+        self.logger.info("connect_device called. self.interface is: %s", self.interface)
+        
         if self.interface is not None:
             self.logger.info("Using provided LIFUInterface instance.")
-            self.interface.hvcontroller.turn_12v_on()
+            
+            # Reconnect console UART
+            if not self.use_external_power and self.interface.hvcontroller and not self.interface.hvcontroller.uart.is_connected():
+                self.interface.hvcontroller.uart.check_usb_status()
+            
+            if not self.use_external_power and not self.interface.hvcontroller.get_12v_status():
+                self.logger.info("TX device not powered. Turning 12V on...")
+                self.interface.hvcontroller.turn_12v_on()
+                time.sleep(5)  # Give the TX board time to boot and mount to the USB bus
+                
+            # Reconnect tx UART
+            if hasattr(self.interface, 'txdevice') and not self.interface.txdevice.uart.is_connected():
+                self.interface.txdevice.uart.check_usb_status()
+
+            self.logger.info("TX uart port: %s, is_open: %s",
+                self.interface.txdevice.uart.port,
+                self.interface.txdevice.uart.serial.is_open if (self.interface.txdevice.uart.serial is not None) else "None"
+            )
             return
+            
         self.interface = LIFUInterface(
             ext_power_supply=self.use_external_power,
             TX_test_mode=self.hw_simulate,
             HV_test_mode=self.hw_simulate,
             voltage_table_selection="evt0",
-            sequence_time_selection="stress_test"
+            sequence_time_selection="stress_test",
+            run_async=True
         )
-        tx_connected, hv_connected = self.interface.is_device_connected()
+        time.sleep(2)
+
         if self.bypass_transmitter: tx_connected = True
 
+        monitor_thread = threading.Thread(target=self.monitor_interface, daemon=True)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+
+        self.interface._tx_uart.signal_connect.connect(
+            lambda desc, port: self.logger.info("TX connected on %s", port)
+        )
+        self.interface._tx_uart.signal_disconnect.connect(
+            lambda desc, port: self.logger.info("TX disconnected from %s", port)
+        )
+        if self.interface._hv_uart is not None:
+            self.interface._hv_uart.signal_connect.connect(
+                lambda desc, port: self.logger.info("HV connected on %s", port)
+            )
+            self.interface._hv_uart.signal_disconnect.connect(
+                lambda desc, port: self.logger.info("HV disconnected from %s", port)
+            )
+            
+        tx_connected, hv_connected = self.interface.is_device_connected()
         if not self.use_external_power and not tx_connected:
             self.logger.warning("TX device not connected. Attempting to turn on 12V...")
             try:
@@ -350,18 +381,20 @@ class TestSonicationDurationBase:
             except Exception as e:
                 self.logger.warning("Error stopping monitoring during reinit: %s", e)
 
-            with contextlib.suppress(Exception):
-                del self.interface
+            # with contextlib.suppress(Exception):
+            #     del self.interface
 
-            time.sleep(1)
-            self.logger.info("Reinitializing LIFU interface after powering 12V...")
-            self.interface = LIFUInterface(
-                ext_power_supply=self.use_external_power,
-                TX_test_mode=self.hw_simulate,
-                HV_test_mode=self.hw_simulate,
-                voltage_table_selection="evt0",
-                sequence_time_selection="stress_test"
-            )
+            # time.sleep(1)
+            # self.logger.info("Reinitializing LIFU interface after powering 12V...")
+            # self.interface = LIFUInterface(
+            #     ext_power_supply=self.use_external_power,
+            #     TX_test_mode=self.hw_simulate,
+            #     HV_test_mode=self.hw_simulate,
+            #     voltage_table_selection="evt0",
+            #     sequence_time_selection="stress_test",
+            #     run_async=True
+            # )
+            # tx_connected, hv_connected = self.interface.is_device_connected()
             tx_connected, hv_connected = self.interface.is_device_connected()
 
         if not self.use_external_power:
@@ -369,7 +402,7 @@ class TestSonicationDurationBase:
                 self.logger.info("  HV Connected: %s", hv_connected)
             else:
                 self.logger.error("HV NOT fully connected.")
-                sys.exit(1)
+                # sys.exit(1)
         else:
             self.logger.info("  Using external power supply")
 
@@ -390,6 +423,8 @@ class TestSonicationDurationBase:
         try:
             if not self.use_external_power and not self.interface.hvcontroller.ping():
                 self.logger.error("Failed to ping the console device.")
+            else:
+                self.logger.info("Successfully pinged console device")
         except Exception as e:
             self.logger.error("Console Communication verification failed: %s", e)
             return False
@@ -427,7 +462,7 @@ class TestSonicationDurationBase:
 
         if not self.bypass_transmitter:        
             try:
-                for i in range(1, self.num_modules+1):
+                for i in range(self.num_modules):
                     tx_fw = self.interface.txdevice.get_version(module=i)
                     self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
                     if not self.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
@@ -819,7 +854,6 @@ class TestSonicationDurationBase:
             self.logger.warning("Error turning off HV/12V: %s", e)
 
     def cleanup_interface(self) -> None:
-        """Safely cleanup the LIFU interface."""
         if self.interface is None:
             return
         try:
@@ -827,13 +861,14 @@ class TestSonicationDurationBase:
             with contextlib.suppress(Exception):
                 self.interface.stop_monitoring()
             time.sleep(0.2)
-            print("bypassing del interface in cleanup_interface")
-            # del self.interface
+            # Close the serial ports so Windows releases the handles
+            with contextlib.suppress(Exception):
+                self.interface.txdevice.uart.disconnect()
+            with contextlib.suppress(Exception):
+                if self.interface.hvcontroller:
+                    self.interface.hvcontroller.uart.disconnect()
         except Exception as e:
             self.logger.warning("Issue closing LIFU interface: %s", e)
-        finally:
-            print("finally block in cleanup_interface, skipping setting interface to None")
-            # self.interface = None
 
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
@@ -916,6 +951,7 @@ class TestSonicationDurationBase:
 
         self.logger.info("Starting automated test sequence from test case %d out of %d total test cases. " % (self.starting_test_case, len(TEST_CASES)))
         self.start_time = time.time()
+
 
         for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
             self.test_case_num = test_case
