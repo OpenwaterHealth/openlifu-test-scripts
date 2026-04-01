@@ -22,17 +22,19 @@ from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+from packaging.version import Version
 
 from serial.serialutil import SerialException
 
 import numpy as np
 
+# from openlifu_sdk import LIFUInterface
 import openlifu
 from openlifu.bf.pulse import Pulse
 from openlifu.bf.sequence import Sequence
 from openlifu.db import Database
 from openlifu.geo import Point
-from openlifu.io.LIFUInterface import LIFUInterface
+from openlifu_sdk.io import LIFUInterface
 from openlifu.plan.solution import Solution
 
 try:
@@ -50,7 +52,7 @@ Thermal Stress Test Script
 __version__ = "1.0.3"
 TEST_ID = Path(__file__).name.replace(".py", "")
 REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
-REQUIRED_TX_FW_VERSION = "2.0.4-1-g55452b2"
+MIN_REQUIRED_TX_FW_VERSION = "2.0.3"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
@@ -312,7 +314,6 @@ class TestSonicationDurationBase:
 
     def connect_device(self) -> None:
         """Connect to the LIFU device and verify connection."""
-        self.logger.info("connect_device called. self.interface is: %s", self.interface)
         
         if self.interface is not None:
             self.logger.info("Using provided LIFUInterface instance.")
@@ -366,11 +367,19 @@ class TestSonicationDurationBase:
                 lambda desc, port: self.logger.info("HV disconnected from %s", port)
             )
             
+        time.sleep(3)
+        
         tx_connected, hv_connected = self.interface.is_device_connected()
         if not self.use_external_power and not tx_connected:
             self.logger.warning("TX device not connected. Attempting to turn on 12V...")
             try:
-                self.interface.hvcontroller.turn_12v_on()
+                while not self.interface.hvcontroller.get_12v_status():
+                    time.sleep(1)
+                    try:
+                        self.interface.hvcontroller.turn_12v_on()
+                        time.sleep(1)
+                    except Exception as e:
+                        self.logger.error("Error turning on 12V: %s", e)
             except Exception as e:
                 self.logger.error("Error turning on 12V: %s", e)
             time.sleep(2)
@@ -439,6 +448,11 @@ class TestSonicationDurationBase:
                 return False
         else:
             return True
+        
+    def _parse_fw_version(self, version_str: str) -> Version:
+        """Strip any local version suffix (e.g. '2.0.3-tsfdj') before parsing."""
+        base = version_str.split("-")[0]
+        return Version(base)
 
     def get_firmware_versions(self) -> None:
         """Retrieve and log firmware versions from the LIFU device."""
@@ -465,9 +479,9 @@ class TestSonicationDurationBase:
                 for i in range(self.num_modules):
                     tx_fw = self.interface.txdevice.get_version(module=i)
                     self.logger.info("TX Device %d Firmware Version: %s", i, tx_fw)
-                    if not self.bypass_tx_fw and tx_fw != REQUIRED_TX_FW_VERSION:
+                    if not self.bypass_tx_fw and self._parse_fw_version(tx_fw) < self._parse_fw_version(MIN_REQUIRED_TX_FW_VERSION):
                         self.logger.error("TX firmware version %s does not match required version %s.",
-                                        tx_fw, REQUIRED_TX_FW_VERSION)
+                                        tx_fw, MIN_REQUIRED_TX_FW_VERSION)
                         tx_fw_mismatch = True
             except Exception as e:
                 self.logger.error("Error retrieving TX device firmware version: %s", e)        
@@ -476,7 +490,7 @@ class TestSonicationDurationBase:
             if console_fw_mismatch:
                 self.logger.error("\n\n!! Incompatible console firmware version, please upgrade to %s !!\n\n", REQUIRED_CONSOLE_FW_VERSION)
             if tx_fw_mismatch:
-                self.logger.error("\n\n!! Incompatible TX firmware version, please upgrade to %s !!\n\n", REQUIRED_TX_FW_VERSION)
+                self.logger.error("\n\n!! Incompatible TX firmware version, please upgrade to %s !!\n\n", MIN_REQUIRED_TX_FW_VERSION)
             sys.exit()
 
     def enumerate_devices(self):
@@ -535,6 +549,7 @@ class TestSonicationDurationBase:
             voltage=self.voltage,
             sequence=sequence,
         )
+        solution = solution.to_dict()  # Convert to dict for LIFUInterface
 
         profile_index = 1
         profile_increment = True
