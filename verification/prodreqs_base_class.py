@@ -969,6 +969,9 @@ class TestSonicationDurationBase:
 
 
         for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
+            if self.test_status in ("aborted by user", "error"):
+                self.logger.warning("Previous test case ended with status '%s'. Aborting remaining test cases.", self.test_status)
+                break
             self.test_case_num = test_case
             self.test_results[self.test_case_num] = TestCaseResult()
             self.voltage = float(test_case_parameters["voltage"])
@@ -1057,6 +1060,7 @@ class TestSonicationDurationBase:
                     self.logger.warning("Test aborted by user KeyboardInterrupt.")
                     self.test_status = "aborted by user"
                     self.shutdown_event.set()
+                    raise
 
                 # Ensure shutdown event set
                 if not self.shutdown_event.is_set():
@@ -1127,6 +1131,11 @@ class TestSonicationDurationBase:
                     self.test_results[self.test_case_num] = "FAILED (unexpected error)"
                 
                 self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
+
+                if self.test_status == "aborted by user":
+                    self.logger.info("Aborting remaining test cases due to user interrupt.")
+                    self.print_test_summary()
+                    return
                 # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
 
         self.print_test_summary()    
