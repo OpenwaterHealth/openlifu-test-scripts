@@ -105,6 +105,10 @@ def calculate_temperature_discharge_time_seconds(final_temp_C: float) -> float:
     return 60.0*minutes # temp value until formula figured out
 '''
 
+class AbortTest(Exception):
+    """Custom exception to signal test abortion."""
+    pass
+
 
 class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
@@ -367,21 +371,23 @@ class TestSonicationDurationBase:
                 lambda desc, port: self.logger.info("HV disconnected from %s", port)
             )
             
-        time.sleep(3)
+        time.sleep(2)
         
         tx_connected, hv_connected = self.interface.is_device_connected()
         if not self.use_external_power and not tx_connected:
             self.logger.warning("TX device not connected. Attempting to turn on 12V...")
             try:
-                while not self.interface.hvcontroller.get_12v_status():
-                    time.sleep(1)
+                for attempt in range(3):
+                    if self.interface.hvcontroller.get_12v_status():
+                        self.logger.info("12V is now on.")
+                        break
                     try:
                         self.interface.hvcontroller.turn_12v_on()
                         time.sleep(1)
                     except Exception as e:
                         self.logger.error("Error turning on 12V: %s", e)
             except Exception as e:
-                self.logger.error("Error turning on 12V: %s", e)
+                self.logger.error("Error turning on 12V after 3 attempts: %s", e)
             time.sleep(2)
 
             # Reinitialize interface after powering 12V
@@ -670,8 +676,9 @@ class TestSonicationDurationBase:
             time.sleep(self.temperature_check_interval)
 
         self.logger.warning("Console voltage shutdown triggered.")
-        self.shutdown_event.set()
-        self.voltage_shutdown_event.set()
+        if not self.shutdown_event.is_set():
+            self.shutdown_event.set()
+            self.voltage_shutdown_event.set()
 
     def monitor_temperature(self) -> None:
         """Thread target: monitor temperatures and trigger shutdown on safety violations."""
@@ -789,8 +796,9 @@ class TestSonicationDurationBase:
             time.sleep(self.temperature_check_interval)
         
         self.logger.warning("Temperature shutdown triggered.")
-        self.shutdown_event.set()
-        self.temperature_shutdown_event.set()
+        if not self.shutdown_event.is_set():
+            self.shutdown_event.set()
+            self.temperature_shutdown_event.set()
 
     def _verify_start_conditions(self, test_case, starting_temperature) -> None:
         """Monitor cooldown period before starting the test."""
@@ -808,7 +816,13 @@ class TestSonicationDurationBase:
                              f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again.")
             self.turn_off_console_and_tx()
             self.cleanup_interface()
-            time.sleep(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS)  # Wait before rechecking
+
+            if self.shutdown_event.wait(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS):
+                self.logger.info("Shutdown event set during cooldown wait. Exiting.")
+                raise AbortTest()
+            
+            # time.sleep(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS)  # Wait before rechecking
+            
             self.connect_device()
             self.verify_communication()
             temp = self.interface.txdevice.get_temperature()  # Update temperature after cooldown
@@ -967,178 +981,193 @@ class TestSonicationDurationBase:
         self.logger.info("Starting automated test sequence from test case %d out of %d total test cases. " % (self.starting_test_case, len(TEST_CASES)))
         self.start_time = time.time()
 
-
-        for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
-            if self.test_status in ("aborted by user", "error"):
-                self.logger.warning("Previous test case ended with status '%s'. Aborting remaining test cases.", self.test_status)
-                break
-            self.test_case_num = test_case
-            self.test_results[self.test_case_num] = TestCaseResult()
-            self.voltage = float(test_case_parameters["voltage"])
-            self.interval_msec = int(test_case_parameters["PRI_ms"])
-            self.duration_msec = int(test_case_parameters["duty_cycle"] / 100 * self.interval_msec)
-            
-            self.logger.info(f"Starting test case {self.test_case_num} out of {len(TEST_CASES)}")
-            self.logger.info("Test Case %d: %dV, %d%% Duty Cycle, %dms duration, %dms PRI, Max Starting Temperature: %dC",
-                             self.test_case_num, 
-                             self.voltage, 
-                             test_case_parameters["duty_cycle"], 
-                             self.duration_msec, 
-                             self.interval_msec, 
-                             test_case_parameters["max_starting_temperature"])
-
-            test_case_start_time = 0
-
-            try:
-                if not self.hw_simulate:
-                    self.connect_device()
-                    self.verify_communication()
-
-                    # if test has already run at least once, skip
-                    if test_case == self.starting_test_case: 
-                        self.get_firmware_versions()
-                        self.enumerate_devices()
-                        
-                    self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
-                else:
-                    self.logger.info("Hardware simulation enabled; skipping device configuration.")
-
-                if self.test_runthrough:
-                    self.sequence_duration = SHORT_TEST_DURATION_SECONDS
-                elif self.voltage is not None and self.voltage <= LOW_VOLTAGE_VALUE:
-                    self.sequence_duration = LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS
-                else:
-                    self.sequence_duration = TEST_CASE_DURATION_SECONDS
+        try:
+            for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
+                if self.test_status in ("aborted by user", "error"):
+                    self.logger.warning("Previous test case ended with status '%s'. Aborting remaining test cases.", self.test_status)
+                    break
+                self.test_case_num = test_case
+                self.test_results[self.test_case_num] = TestCaseResult()
+                self.voltage = float(test_case_parameters["voltage"])
+                self.interval_msec = int(test_case_parameters["PRI_ms"])
+                self.duration_msec = int(test_case_parameters["duty_cycle"] / 100 * self.interval_msec)
                 
-                self.configure_solution()
+                self.logger.info(f"Starting test case {self.test_case_num} out of {len(TEST_CASES)}")
+                self.logger.info("Test Case %d: %dV, %d%% Duty Cycle, %dms duration, %dms PRI, Max Starting Temperature: %dC",
+                                self.test_case_num, 
+                                self.voltage, 
+                                test_case_parameters["duty_cycle"], 
+                                self.duration_msec, 
+                                self.interval_msec, 
+                                test_case_parameters["max_starting_temperature"])
 
-                # Start sonication
-                if not self.hw_simulate:
-                    self.logger.info("Starting Trigger...")
-                    if not self.interface.start_sonication():
-                        self.logger.error("Failed to start trigger.")
-                        self.test_status = "error"
-                        return
-                    test_case_start_time = time.time()
-                else:
-                    self.logger.info("Simulated Trigger start... (no hardware)")
+                test_case_start_time = 0
 
-                self.logger.info("Trigger Running... (Press CTRL-C to stop early)")
-                self.test_status = "running"
-
-                # Start monitoring threads
-                self.shutdown_event.clear()
-                self.sequence_complete_event.clear()
-                self.temperature_shutdown_event.clear()
-                self.voltage_shutdown_event.clear()
-
-                temp_thread = threading.Thread(
-                    target=self.monitor_temperature,
-                    name="TemperatureMonitorThread",
-                    # daemon=True,
-                )
-                completion_thread = threading.Thread(
-                    target=self.exit_on_time_complete,
-                    name="SequenceCompletionThread",
-                    # daemon=True,
-                )
-                voltage_thread = threading.Thread(
-                    target=self.monitor_console_voltage,
-                    name="ConsoleVoltageMonitorThread",
-                    # daemon=True,
-                )
-                
-                voltage_thread.start()
-                temp_thread.start()
-                completion_thread.start()
-
-                # Wait for threads or user interrupt
                 try:
-                    while not self.shutdown_event.is_set():
-                        time.sleep(0.1)
-                except KeyboardInterrupt:
-                    self.logger.warning("Test aborted by user KeyboardInterrupt.")
-                    self.test_status = "aborted by user"
-                    self.shutdown_event.set()
-                    raise
-
-                # Ensure shutdown event set
-                if not self.shutdown_event.is_set():
-                    self.logger.warning("A thread exited without setting shutdown event; forcing shutdown.")
-                    self.shutdown_event.set()
-
-                # Stop sonication
-                if not self.hw_simulate and self.interface is not None:
-                    try:
-                        if self.interface.stop_sonication():
-                            self.logger.info("Trigger stopped successfully.")
-                        else:
-                            self.logger.error("Failed to stop trigger.")
-                    except Exception as e:
-                        self.logger.error("Error stopping trigger: %s", e)
-
-                # Wait for threads to exit gracefully
-                temp_thread.join()
-                voltage_thread.join()
-                completion_thread.join()
-
-                # Determine final status
-                if self.test_status not in ("aborted by user", "error"):
-                    if self.sequence_complete_event.is_set():
-                        self.test_status = "passed"
-                    elif self.temperature_shutdown_event.is_set():
-                        self.test_status = "temperature shutdown"
-                    elif self.voltage_shutdown_event.is_set():
-                        self.test_status = "voltage deviation"
-                    else:
-                        self.test_status = "error"
-            finally:
-                # Record test time
-                # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
-                duration = time.time() - test_case_start_time if test_case_start_time else 0.0
-                self.test_results[self.test_case_num].test_time_elapsed = duration
-
-                # Power down and cleanup
-                if not self.hw_simulate:
-                    with contextlib.suppress(Exception):
-                        self.turn_off_console_and_tx()
-                    self.cleanup_interface()
-
-                # Final status log
-                if self.test_status == "passed":
-                    self.logger.info("TEST CASE %d PASSED.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "PASSED"
-                elif self.test_status == "temperature shutdown":
-                    self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "FAILED (temperature shutdown)"
-                elif self.test_status == "aborted by user":
-                    self.logger.info("TEST CASE %d ABORTED by user.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "ABORTED"
-                elif self.test_status == "voltage deviation":
-                    self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "FAILED (voltage deviation)"
-                elif self.test_status == "error":
-                    self.logger.info("TEST CASE %d FAILED due to error.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "FAILED (error)"
-                elif self.test_status == "not started":
-                    self.logger.info("TEST CASE %d NOT RUN.", self.test_case_num)
-                    self.test_results[self.test_case_num].status = "NOT RUN"
-                else:
-                    self.logger.info(
-                        "TEST CASE %d FAILED due to unexpected error.",
-                        self.test_case_num,
-                    )
-                    self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                    self.shutdown_event.clear()
+                    self.sequence_complete_event.clear()
+                    self.temperature_shutdown_event.clear()
+                    self.voltage_shutdown_event.clear()
                 
-                self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        raise AbortTest()
 
-                if self.test_status == "aborted by user":
-                    self.logger.info("Aborting remaining test cases due to user interrupt.")
-                    self.print_test_summary()
-                    return
-                # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
+                    if not self.hw_simulate:
+                        self.connect_device()
+                        self.verify_communication()
 
-        self.print_test_summary()    
+                        # if test has already run at least once, skip
+                        if test_case == self.starting_test_case: 
+                            self.get_firmware_versions()
+                            self.enumerate_devices()
+
+                        self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
+                    else:
+                        self.logger.info("Hardware simulation enabled; skipping device configuration.")
+
+                    if self.test_runthrough:
+                        self.sequence_duration = SHORT_TEST_DURATION_SECONDS
+                    elif self.voltage is not None and self.voltage <= LOW_VOLTAGE_VALUE:
+                        self.sequence_duration = LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS
+                    else:
+                        self.sequence_duration = TEST_CASE_DURATION_SECONDS
+                    
+                    self.configure_solution()
+
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        raise AbortTest()
+
+                    # Start sonication
+                    if not self.hw_simulate:
+                        self.logger.info("Starting Trigger...")
+                        if not self.interface.start_sonication():
+                            self.logger.error("Failed to start trigger.")
+                            self.test_status = "error"
+                            return
+                        test_case_start_time = time.time()
+                    else:
+                        self.logger.info("Simulated Trigger start... (no hardware)")
+
+                    self.logger.info("Trigger Running... (Press CTRL-C to stop early)")
+                    self.test_status = "running"
+
+                    # Start monitoring threads
+                    # self.shutdown_event.clear()
+                    # self.sequence_complete_event.clear()
+                    # self.temperature_shutdown_event.clear()
+                    # self.voltage_shutdown_event.clear()
+
+                    temp_thread = threading.Thread(
+                        target=self.monitor_temperature,
+                        name="TemperatureMonitorThread",
+                        # daemon=True,
+                    )
+                    completion_thread = threading.Thread(
+                        target=self.exit_on_time_complete,
+                        name="SequenceCompletionThread",
+                        # daemon=True,
+                    )
+                    voltage_thread = threading.Thread(
+                        target=self.monitor_console_voltage,
+                        name="ConsoleVoltageMonitorThread",
+                        # daemon=True,
+                    )
+                    
+                    voltage_thread.start()
+                    temp_thread.start()
+                    completion_thread.start()
+
+                    # Wait for threads or user interrupt
+                    try:
+                        while not self.shutdown_event.is_set():
+                            time.sleep(0.1)
+                    except KeyboardInterrupt:
+                        self.logger.warning("Test aborted by user KeyboardInterrupt.")
+                        self.test_status = "aborted by user"
+                        self.shutdown_event.set()
+                        raise
+
+                    # Ensure shutdown event set
+                    if not self.shutdown_event.is_set():
+                        self.logger.warning("A thread exited without setting shutdown event; forcing shutdown.")
+                        self.shutdown_event.set()
+
+                    # Stop sonication
+                    if not self.hw_simulate and self.interface is not None:
+                        try:
+                            if self.interface.stop_sonication():
+                                self.logger.info("Trigger stopped successfully.")
+                            else:
+                                self.logger.error("Failed to stop trigger.")
+                        except Exception as e:
+                            self.logger.error("Error stopping trigger: %s", e)
+
+                    # Wait for threads to exit gracefully
+                    temp_thread.join()
+                    voltage_thread.join()
+                    completion_thread.join()
+
+                    # Determine final status
+                    if self.test_status not in ("aborted by user", "error"):
+                        if self.sequence_complete_event.is_set():
+                            self.test_status = "passed"
+                        elif self.temperature_shutdown_event.is_set():
+                            self.test_status = "temperature shutdown"
+                        elif self.voltage_shutdown_event.is_set():
+                            self.test_status = "voltage deviation"
+                        else:
+                            self.test_status = "error"
+                finally:
+                    # Record test time
+                    # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
+                    duration = time.time() - test_case_start_time if test_case_start_time else 0.0
+                    self.test_results[self.test_case_num].test_time_elapsed = duration
+
+                    # Power down and cleanup
+                    if not self.hw_simulate:
+                        with contextlib.suppress(Exception):
+                            self.turn_off_console_and_tx()
+                        self.cleanup_interface()
+
+                    # Final status log
+                    if self.test_status == "passed":
+                        self.logger.info("TEST CASE %d PASSED.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "PASSED"
+                    elif self.test_status == "temperature shutdown":
+                        self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "FAILED (temperature shutdown)"
+                    elif self.test_status == "aborted by user":
+                        self.logger.info("TEST CASE %d ABORTED by user.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "ABORTED"
+                    elif self.test_status == "voltage deviation":
+                        self.logger.info("TEST CASE %d FAILED.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "FAILED (voltage deviation)"
+                    elif self.test_status == "error":
+                        self.logger.info("TEST CASE %d FAILED due to error.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "FAILED (error)"
+                    elif self.test_status == "not started":
+                        self.logger.info("TEST CASE %d NOT RUN.", self.test_case_num)
+                        self.test_results[self.test_case_num].status = "NOT RUN"
+                    else:
+                        self.logger.info(
+                            "TEST CASE %d FAILED due to unexpected error.",
+                            self.test_case_num,
+                        )
+                        self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                    
+                    self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
+
+                    if self.test_status == "aborted by user":
+                        self.logger.info("Aborting remaining test cases due to user interrupt.")
+                        # self.print_test_summary()
+                        # return
+                    # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
+        except AbortTest:
+            self.logger.warning("Test sequence aborted by user. Exiting remaining test cases.")
+        finally:
+            self.print_test_summary()    
 
 @dataclass
 class TestCaseResult:
