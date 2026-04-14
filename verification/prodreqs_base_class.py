@@ -15,9 +15,11 @@ import argparse
 import contextlib
 import logging
 import sys
+import os
 import threading
 import time
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
@@ -29,13 +31,14 @@ from serial.serialutil import SerialException
 import numpy as np
 
 # from openlifu_sdk import LIFUInterface
-import openlifu
-from openlifu.bf.pulse import Pulse
-from openlifu.bf.sequence import Sequence
-from openlifu.db import Database
-from openlifu.geo import Point
+import openlifu_sdk
 from openlifu_sdk.io import LIFUInterface
-from openlifu.plan.solution import Solution
+# from openlifu.bf.pulse import Pulse
+# from openlifu.bf.sequence import Sequence
+# from openlifu.db import Database
+# from openlifu.geo import Point
+# from openlifu_sdk.io import LIFUInterface
+# from openlifu.plan.solution import Solution
 
 try:
     from .config import *
@@ -51,8 +54,21 @@ Thermal Stress Test Script
 
 __version__ = "1.0.3"
 TEST_ID = Path(__file__).name.replace(".py", "")
-REQUIRED_CONSOLE_FW_VERSION = "v1.2.2"
-MIN_REQUIRED_TX_FW_VERSION = "2.0.3"
+
+# Constants for solution generation
+SPEED_OF_SOUND = 1500  # Speed of sound in m/s, used for time-of-flight calculations
+NUM_ELEMENTS_PER_MODULE = 64  # Assuming each module has 64 elements, adjust as needed
+
+def _base_path():
+    """Return the directory containing bundled data files.
+    Works in both frozen (PyInstaller) and normal Python execution."""
+    import sys as _sys
+    import os as _os
+    if getattr(_sys, 'frozen', False):
+        return _sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+MIN_REQUIRED_CONSOLE_FW_VERSION = "1.2.4"
+MIN_REQUIRED_TX_FW_VERSION = "2.0.5"
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
@@ -71,8 +87,7 @@ TEST_CASES = [
     {"voltage": 5,  "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
 ]
 
-
-
+default_coordinates = {"x": 0.0, "y": 0.0, "z": 50.0}
 
 class SafeFormatter(logging.Formatter):
     """Formatter that handles Unicode characters safely on Windows."""
@@ -137,7 +152,7 @@ class TestSonicationDurationBase:
         # self.args = args
 
         # Derived paths
-        self.openlifu_dir = Path(openlifu.__file__).parent.parent.parent.resolve()
+        self.openlifu_dir = Path(openlifu_sdk.__file__).parent.parent.parent.resolve()
         self.log_dir = Path(log_dir or (Path(__file__).resolve().parents[1] / "logs"))
         
         # Runtime attributes
@@ -184,6 +199,11 @@ class TestSonicationDurationBase:
         self.ambient_shutoff_temp_C = ambient_shutoff_temp
         self.temperature_check_interval = temperature_check_interval
         self.temperature_log_interval = temperature_log_interval
+
+        # Solution loading state
+        self._solution_loaded = False
+        self._loaded_solution_data = None
+        self._solution_name = ""
 
         # Logger
         self._file_handler_attached = False
@@ -473,9 +493,9 @@ class TestSonicationDurationBase:
             if not self.use_external_power:
                 console_fw = self.interface.hvcontroller.get_version()
                 self.logger.info("Console Firmware Version: %s", console_fw)
-            if not self.bypass_console_fw and console_fw != REQUIRED_CONSOLE_FW_VERSION:
+            if not self.bypass_console_fw and self._parse_fw_version(console_fw) < self._parse_fw_version(MIN_REQUIRED_CONSOLE_FW_VERSION):
                 self.logger.error("Console firmware version %s does not match required version %s.",
-                                console_fw, REQUIRED_CONSOLE_FW_VERSION)
+                                console_fw, MIN_REQUIRED_CONSOLE_FW_VERSION)
                 console_fw_mismatch = True
         except Exception as e:
             self.logger.error("Error retrieving console firmware version: %s", e)
@@ -494,7 +514,7 @@ class TestSonicationDurationBase:
 
         if console_fw_mismatch or tx_fw_mismatch:
             if console_fw_mismatch:
-                self.logger.error("\n\n!! Incompatible console firmware version, please upgrade to %s !!\n\n", REQUIRED_CONSOLE_FW_VERSION)
+                self.logger.error("\n\n!! Incompatible console firmware version, please upgrade to %s !!\n\n", MIN_REQUIRED_CONSOLE_FW_VERSION)
             if tx_fw_mismatch:
                 self.logger.error("\n\n!! Incompatible TX firmware version, please upgrade to %s !!\n\n", MIN_REQUIRED_TX_FW_VERSION)
             sys.exit()
@@ -512,63 +532,429 @@ class TestSonicationDurationBase:
         else:
             raise Exception(f"Number of TX7332 devices found: {num_tx_devices} != 2x{self.num_modules}")
 
+    def get_solution(self, xInput, yInput, zInput, freq, voltage, pulseInterval, pulseCount, trainInterval, trainCount, durationS, validate=False):
+        """Get or calculate a solution dictionary.
+        
+        If a solution is loaded, use that; otherwise calculate a new one based on the parameters.
+        
+        Args:
+            xInput, yInput, zInput: Focus point coordinates
+            freq: Frequency in kHz
+            voltage: Voltage in volts
+            pulseInterval: Pulse interval in ms
+            pulseCount: Number of pulses
+            trainInterval: Train interval
+            trainCount: Number of trains
+            durationS: Duration in microseconds
+            validate: If True, validate the loaded solution against connected modules
+            
+        Returns:
+            dict: Solution dictionary with delays, apodizations, pulse, sequence, and transducer data
+        """
+        # Validate parameter types
+        try:
+            xInput = float(xInput)
+            yInput = float(yInput)
+            zInput = float(zInput)
+            freq = float(freq)
+            voltage = float(voltage)
+            pulseInterval = float(pulseInterval)
+            pulseCount = int(pulseCount)
+            trainInterval = float(trainInterval)
+            trainCount = int(trainCount)
+            durationS = float(durationS)
+        except (TypeError, ValueError) as e:
+            self.logger.error(f"Invalid parameter type in get_solution: {e}")
+            raise ValueError(f"Invalid parameter type in get_solution: {e}")
+        
+        if self._solution_loaded:
+            self.logger.info("Using loaded solution for configuration")
+            solution = self._loaded_solution_data.copy()  # Make a copy to avoid modifying the original
+            # Check if delays and apodizations match the number of elements in the loaded solution
+            delays_arr = np.array(solution["delays"]).reshape(-1)  # Ensure it's a 1D array
+            apodizations_arr = np.array(solution["apodizations"]).reshape(-1)  # Ensure it's a 1D array
+            if validate:
+                if delays_arr.ndim == 1:
+                    n_delays = delays_arr.shape[0]
+                else:
+                    n_delays = delays_arr.shape[1]
+                if n_delays != self.num_modules * NUM_ELEMENTS_PER_MODULE:
+                    self.logger.error(
+                        f"Loaded solution has {len(delays_arr)} delays, but expected {self.num_modules * NUM_ELEMENTS_PER_MODULE} for {self.num_modules} modules."
+                    )
+                    raise ValueError(
+                        f"Loaded solution has {len(delays_arr)} delays, but expected {self.num_modules * NUM_ELEMENTS_PER_MODULE} for {self.num_modules} modules."
+                    )
+                if apodizations_arr.ndim == 1:
+                    n_apodizations = apodizations_arr.shape[0]
+                else:
+                    n_apodizations = apodizations_arr.shape[1]
+                if n_apodizations != self.num_modules * NUM_ELEMENTS_PER_MODULE:
+                    self.logger.error(
+                        f"Loaded solution has {len(apodizations_arr)} apodizations, but expected {self.num_modules * NUM_ELEMENTS_PER_MODULE} for {self.num_modules} modules."
+                    )
+                    raise ValueError(
+                        f"Loaded solution has {len(apodizations_arr)} apodizations, but expected {self.num_modules * NUM_ELEMENTS_PER_MODULE} for {self.num_modules} modules."
+                    )
+            
+            # Ensure pulse and sequence have correct types before returning
+            if "pulse" in solution and isinstance(solution["pulse"], dict):
+                solution["pulse"]["frequency"] = float(solution["pulse"].get("frequency", 0))
+                solution["pulse"]["duration"] = float(solution["pulse"].get("duration", 0))
+                solution["pulse"]["amplitude"] = float(solution["pulse"].get("amplitude", 1.0))
+            if "sequence" in solution and isinstance(solution["sequence"], dict):
+                solution["sequence"]["pulse_interval"] = float(solution["sequence"].get("pulse_interval", 0))
+                solution["sequence"]["pulse_count"] = int(solution["sequence"].get("pulse_count", 1))
+                solution["sequence"]["pulse_train_interval"] = float(solution["sequence"].get("pulse_train_interval", 0))
+                solution["sequence"]["pulse_train_count"] = int(solution["sequence"].get("pulse_train_count", 1))
+            if "voltage" in solution:
+                solution["voltage"] = float(solution.get("voltage", 0))
+            
+            return solution
+        
+        # Calculate a new solution
+        frequency_hz = float(freq) * 1e3
+        duration_seconds = float(durationS) * 1e-6
+        pulse_interval_seconds = float(pulseInterval) * 1e-3
+
+        def load_element_positions_from_file(filepath):
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            if "type" in data and data["type"] == "TransducerArray":
+                modules = []
+                for module in data['modules']:
+                    module_transform = np.array(module['transform'])
+                    element_positions = np.array([elem['position'] for elem in module['elements']])
+                    element_positions = np.hstack((element_positions, np.ones((element_positions.shape[0], 1))))
+                    world_positions = (np.linalg.inv(module_transform) @ element_positions.T).T[:, :3]  # drop the homogeneous coordinate
+                    modules.append(world_positions)
+                element_positions = np.vstack(modules)
+            else:
+                element_positions = np.array([elem['position'] for elem in data['elements']])
+            return element_positions
+
+        focus = np.array([xInput, yInput, zInput])
+        
+        try:
+            element_positions = load_element_positions_from_file(os.path.join(_base_path(), f"pinmap_{self.num_modules}x.json"))
+            if not isinstance(element_positions, np.ndarray):
+                raise TypeError(f"Expected numpy array from load_element_positions_from_file, got {type(element_positions)}")
+                
+            numelements = element_positions.shape[0]
+            self.logger.info(f"{self.num_modules}x config file loaded with {numelements} elements")
+            
+            distances = np.sqrt(np.sum((focus - element_positions)**2, 1))
+            tof = distances * 1e-3 / SPEED_OF_SOUND
+            delays = tof.max() - tof
+            apodizations = np.ones(numelements)
+        except Exception as e:
+            self.logger.error(f"Error calculating solution arrays: {type(e).__name__}: {e}")
+            raise RuntimeError(f"Error calculating solution arrays: {e}")
+        
+        sequence = {
+            "pulse_interval": float(pulse_interval_seconds),
+            "pulse_count": int(pulseCount),
+            "pulse_train_interval": float(trainInterval),
+            "pulse_train_count": int(trainCount)
+        }
+        transducer_dummy = {"elements": [{"position": pos.tolist()} for pos in element_positions]}
+        
+        # Ensure pulse dict has proper types (matching original implementation)
+        pulse_dict = {
+            "frequency": float(frequency_hz),
+            "duration": float(duration_seconds),
+            "amplitude": float(1.0)
+        }
+        
+        solution = {
+            "id": "solution",
+            "name": "Solution",
+            "delays": delays.tolist() if isinstance(delays, np.ndarray) else delays,
+            "apodizations": apodizations.tolist() if isinstance(apodizations, np.ndarray) else apodizations,
+            "pulse": pulse_dict,
+            "sequence": sequence,
+            "voltage": float(voltage),
+            "transducer": transducer_dummy
+        }
+        
+        # Log solution structure right after creation (before any modifications)
+        self.logger.debug(f"get_solution() created solution with keys: {solution.keys()}")
+        self.logger.debug(f"  pulse type: {type(solution['pulse'])}, value: {solution['pulse']}")
+        self.logger.debug(f"  sequence type: {type(solution['sequence'])}, value: {solution['sequence']}")
+        
+        return solution
+
+    def load_solution_from_file(self, file_path: str) -> bool:
+        """Load a solution from a JSON file and store it in the instance.
+        
+        Args:
+            file_path: The path to the solution JSON file
+            
+        Returns:
+            bool: True if loading was successful, False otherwise
+        """
+        try:
+            self.logger.info(f"Attempting to load solution from: {file_path}")
+            
+            # Normalize the path for the current OS
+            normalized_path = os.path.normpath(file_path)
+            self.logger.info(f"Normalized path: {normalized_path}")
+            
+            # Validate file exists and is readable
+            if not os.path.exists(normalized_path):
+                error_msg = f"File not found: {normalized_path}"
+                self.logger.error(error_msg)
+                return False
+                
+            if not os.path.isfile(normalized_path):
+                error_msg = f"Path is not a file: {normalized_path}"
+                self.logger.error(error_msg)
+                return False
+                
+            with open(normalized_path, 'r', encoding='utf-8') as f:
+                solution_data = json.load(f)
+                
+            self.logger.info(f"Successfully parsed JSON from {normalized_path}")
+            self.logger.info(f"JSON data type: {type(solution_data)}")
+            if isinstance(solution_data, dict):
+                self.logger.info(f"JSON keys: {list(solution_data.keys())}")
+            else:
+                self.logger.warning(f"Unexpected JSON data type: {type(solution_data)}, value: {str(solution_data)[:100]}")
+            
+            # Validate solution structure
+            if not self._validate_solution_format(solution_data):
+                return False
+                
+            # If modules are known, verify element count matches
+            if self.num_modules is not None:
+                expected_elements = self.num_modules * NUM_ELEMENTS_PER_MODULE
+                actual_elements = len(solution_data.get('transducer', {}).get('elements', []))
+                
+                if expected_elements != actual_elements:
+                    error_msg = f"Element count mismatch! Expected: {expected_elements} elements ({self.num_modules} modules × {NUM_ELEMENTS_PER_MODULE}), Found in solution: {actual_elements} elements"
+                    self.logger.error(error_msg)
+                    return False
+            
+            # Store loaded solution data
+            self._loaded_solution_data = solution_data
+            self._solution_loaded = True
+            self._solution_name = solution_data.get('name', 'Unnamed Solution')
+            
+            # Log success
+            if "name" in solution_data:
+                message = f"Loaded solution '{solution_data['name']}' from file"
+            else:
+                message = f"Loaded solution with {len(solution_data.get('transducer', {}).get('elements', []))} elements"
+            self.logger.info(message)
+            self.logger.info(f"Successfully loaded solution: {self._solution_name}")
+            return True
+            
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON format: {str(e)}"
+            self.logger.error(error_msg)
+            return False
+        except PermissionError as e:
+            error_msg = f"Permission denied accessing file: {str(e)}"
+            self.logger.error(error_msg)
+            return False
+        except Exception as e:
+            error_msg = f"Error loading solution: {str(e)}"
+            self.logger.error(f"Error loading solution from {file_path}: {e}")
+            return False
+
+    def _validate_solution_format(self, solution_data) -> bool:
+        """Validate that the solution file has the required structure.
+        
+        Args:
+            solution_data: The parsed JSON solution data
+            
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        try:
+            # First check if solution_data is actually a dict
+            if not isinstance(solution_data, dict):
+                self.logger.error(f"Invalid solution format: expected JSON object, got {type(solution_data).__name__}")
+                return False
+            
+            self.logger.info(f"Validating solution with keys: {list(solution_data.keys())}")
+            
+            # Check for required top-level fields
+            required_fields = ['transducer', 'pulse', 'sequence']
+            for field in required_fields:
+                if field not in solution_data:
+                    self.logger.error(f"Missing required field: {field}")
+                    return False
+            
+            # Validate transducer structure
+            transducer = solution_data['transducer']
+            if not isinstance(transducer, dict):
+                self.logger.error("Transducer field must be an object")
+                return False
+                
+            if 'elements' not in transducer:
+                self.logger.error("Missing 'elements' in transducer data")
+                return False
+                
+            if not isinstance(transducer['elements'], list):
+                self.logger.error("Transducer elements must be a list")
+                return False
+                
+            # Validate pulse structure
+            pulse = solution_data['pulse']
+            if not isinstance(pulse, dict):
+                self.logger.error("Pulse field must be an object")
+                return False
+                
+            pulse_fields = ['frequency', 'duration']
+            for field in pulse_fields:
+                if field not in pulse:
+                    self.logger.error(f"Missing pulse field: {field}")
+                    return False
+            
+            # Validate sequence structure
+            sequence = solution_data['sequence']
+            if not isinstance(sequence, dict):
+                self.logger.error("Sequence field must be an object")
+                return False
+                
+            sequence_fields = ['pulse_interval', 'pulse_count']
+            for field in sequence_fields:
+                if field not in sequence:
+                    self.logger.error(f"Missing sequence field: {field}")
+                    return False
+                    
+            self.logger.info("Solution validation passed")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error validating solution format: {str(e)}"
+            self.logger.error(error_msg)
+            return False
+
     def configure_solution(self) -> None:
         """Configure the beamforming solution and load it into the device."""
         if self.interface is None:
             raise RuntimeError("Interface not connected.")
 
-        db_path = self.openlifu_dir / "db_dvc"
-        db = Database(db_path)
-        arr = db.load_transducer(f"openlifu_{self.num_modules}x400_evt1")
-        arr.sort_by_pin()
+        # Validate required parameters
+        if self.frequency_khz is None:
+            raise RuntimeError("Frequency not set. Call _select_frequency() first.")
+        if self.voltage is None:
+            raise RuntimeError("Voltage not set. Call test case selection first.")
+        if self.interval_msec is None:
+            raise RuntimeError("Pulse interval not set. Call test case selection first.")
+        if self.duration_msec is None:
+            raise RuntimeError("Duration not set. Call test case selection first.")
 
-        # Focus at (0, 0, 50 mm)
-        x_input, y_input, z_input = 0, 0, 50
-        target = Point(position=(x_input, y_input, z_input), units="mm")
-        focus = target.get_position(units="mm")
+        solution = self.get_solution(
+            default_coordinates["x"], 
+            default_coordinates["y"], 
+            default_coordinates["z"], 
+            freq=self.frequency_khz, 
+            voltage=self.voltage, 
+            pulseInterval=self.interval_msec, 
+            pulseCount=1, 
+            trainInterval=0, 
+            trainCount=0, 
+            durationS=self.duration_msec * 1000
+        )        
 
-        distances = np.sqrt(
-            np.sum((focus - arr.get_positions(units="mm")) ** 2, axis=1)
-        ).reshape(1, -1)
-        tof = distances * 1e-3 / 1500  # mm to m, divide by 1500 m/s
-        delays = tof.max() - tof
-        apodizations = np.ones((1, arr.numelements()))
+        # Validate solution dict structure before passing to SDK
+        if not isinstance(solution, dict):
+            raise TypeError(f"get_solution() should return a dict, got {type(solution)}")
+        if "pulse" not in solution or not isinstance(solution["pulse"], dict):
+            raise ValueError(f"Solution missing 'pulse' dict. Got: {solution.get('pulse', 'MISSING')}")
+        if "sequence" not in solution or not isinstance(solution["sequence"], dict):
+            raise ValueError(f"Solution missing 'sequence' dict. Got: {solution.get('sequence', 'MISSING')}")
 
-        pulse = Pulse(
-            frequency=self.frequency_khz * 1e3,
-            duration=self.duration_msec * 1e-3,
-        )
+        # Coerce all numeric values to proper types before passing to SDK
+        solution['pulse']['frequency'] = float(solution['pulse'].get('frequency', 0))
+        solution['pulse']['duration'] = float(solution['pulse'].get('duration', 0))
+        solution['pulse']['amplitude'] = float(solution['pulse'].get('amplitude', 1.0))
+        solution['sequence']['pulse_interval'] = float(solution['sequence'].get('pulse_interval', 0))
+        solution['sequence']['pulse_count'] = int(solution['sequence'].get('pulse_count', 1))
+        solution['sequence']['pulse_train_interval'] = float(solution['sequence'].get('pulse_train_interval', 0))
+        solution['sequence']['pulse_train_count'] = int(solution['sequence'].get('pulse_train_count', 1))
+        solution['voltage'] = float(solution.get('voltage', 0))
+        
+        # Final verification before passing to SDK
+        self.logger.info("Final solution values before SDK:")
+        self.logger.info(f"  pulse['duration']: {solution['pulse']['duration']!r} (type={type(solution['pulse']['duration']).__name__})")
+        self.logger.info(f"  sequence['pulse_interval']: {solution['sequence']['pulse_interval']!r} (type={type(solution['sequence']['pulse_interval']).__name__})")
+        self.logger.info(f"  sequence['pulse_train_interval']: {solution['sequence']['pulse_train_interval']!r} (type={type(solution['sequence']['pulse_train_interval']).__name__})")
+        
+        # Test the calculation that SDK will do
+        try:
+            if solution['sequence']['pulse_train_interval'] == 0:
+                test_duty_cycle = solution['pulse']['duration'] / solution['sequence']['pulse_interval']
+            else:
+                test_duty_cycle = (solution['pulse']['duration'] * solution['sequence']['pulse_count']) / solution['sequence']['pulse_train_interval']
+            self.logger.info(f"  Calculated duty cycle: {test_duty_cycle!r} (type={type(test_duty_cycle).__name__})")
+        except Exception as e:
+            self.logger.error(f"  Error calculating duty cycle: {e}")
 
-        sequence = Sequence(
-            pulse_interval=self.interval_msec * 1e-3,
-            pulse_count=int(self.sequence_duration / (self.interval_msec * 1e-3)),
-            pulse_train_interval=0,
-            pulse_train_count=1,
-        )
+        # Check for any unexpected dict values in solution
+        for key, value in solution.items():
+            if isinstance(value, dict):
+                if key not in ('pulse', 'sequence', 'transducer'):
+                    self.logger.warning(f"  Unexpected dict found at solution['{key}']: {value}")
+                else:
+                    for k2, v2 in value.items():
+                        if isinstance(v2, dict) and key in ('pulse', 'sequence'):
+                            self.logger.warning(f"  Nested unexpected dict found at solution['{key}']['{k2}']: {v2}")
 
-        pin_order = np.argsort([el.pin for el in arr.elements])
-        solution = Solution(
-            delays=delays[:, pin_order],
-            apodizations=apodizations[:, pin_order],
-            transducer=arr,
-            pulse=pulse,
-            voltage=self.voltage,
-            sequence=sequence,
-        )
-        solution = solution.to_dict()  # Convert to dict for LIFUInterface
-
-        profile_index = 1
-        profile_increment = True
-        trigger_mode = "continuous"
-
-        self.interface.set_solution(
-            solution=solution,
-            profile_index=profile_index,
-            profile_increment=profile_increment,
-            trigger_mode=trigger_mode,
-        )
+        trigger_mode = "Continuous"
+        
+        try:
+            self.interface.set_solution(
+                solution=solution,
+                trigger_mode=trigger_mode,
+            )
+        except Exception as e:
+            self.logger.error(f"Error calling set_solution(): {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(f"Traceback:\n{traceback.format_exc()}")
+            
+            # Try to serialize solution to JSON to see what's actually being passed
+            try:
+                import json
+                solution_json = json.dumps(solution, default=str)
+                self.logger.error(f"Solution JSON: {solution_json}")
+            except Exception as json_err:
+                self.logger.error(f"Could not serialize solution to JSON: {json_err}")
+                self.logger.error(f"Solution dict keys: {solution.keys()}")
+                for key in solution:
+                    try:
+                        self.logger.error(f"  {key}: {solution[key]!r}")
+                    except Exception as item_err:
+                        self.logger.error(f"  {key}: <error getting value: {item_err}>")
+            raise
 
         self.logger.info("Solution configured for Test Case %s.", self.test_case_num)
+
+    def is_solution_loaded(self) -> bool:
+        """Check if a solution is currently loaded.
+        
+        Returns:
+            bool: True if a solution is loaded, False otherwise
+        """
+        return self._solution_loaded
+
+    def get_loaded_solution_name(self) -> str:
+        """Get the name of the currently loaded solution.
+        
+        Returns:
+            str: The solution name, or empty string if no solution is loaded
+        """
+        return self._solution_name
+
+    def unload_solution(self) -> None:
+        """Unload the currently loaded solution and reset to generation mode."""
+        self._solution_loaded = False
+        self._loaded_solution_data = None
+        self._solution_name = ""
+        self.logger.info("Solution unloaded. Will generate solutions based on parameters.")
 
     # def test_console_voltage_accuracy_no_load(self) -> None:
     #     """Test console voltage accuracy under no-load conditions."""
