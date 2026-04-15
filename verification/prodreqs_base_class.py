@@ -185,6 +185,9 @@ class TestSonicationDurationBase:
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
         self.starting_test_case: int = test_case
         self.test_results: dict[int, TestCaseResult] = {}
+        self.test_case_start_time: float | None = None
+        self.is_in_cooldown: bool = False
+        self.cooldown_start_time: float | None = None
 
         # Flags from args
         self.use_external_power = external_power
@@ -1197,6 +1200,8 @@ class TestSonicationDurationBase:
 
         counter = 0
         while temp > starting_temperature:
+            self.is_in_cooldown = True
+            self.cooldown_start_time = time.time()
             self.logger.info(f"Current temperature of {temp}C is greater than max starting "
                              f"temperature of {starting_temperature}C for test case {test_case}. "
                              f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again.")
@@ -1205,6 +1210,7 @@ class TestSonicationDurationBase:
 
             if self.shutdown_event.wait(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS):
                 self.logger.info("Shutdown event set during cooldown wait. Exiting.")
+                self.is_in_cooldown = False
                 raise AbortTest()
             
             # time.sleep(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS)  # Wait before rechecking
@@ -1213,6 +1219,8 @@ class TestSonicationDurationBase:
             self.verify_communication()
             temp = self.interface.txdevice.get_temperature()  # Update temperature after cooldown
             counter += 1
+        
+        self.is_in_cooldown = False
 
         if counter > 0:
             self.logger.info(f"TX module took ~{counter * TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down to starting temperature of {starting_temperature}C.")
@@ -1387,7 +1395,7 @@ class TestSonicationDurationBase:
                                 self.interval_msec, 
                                 test_case_parameters["max_starting_temperature"])
 
-                test_case_start_time = 0
+                self.test_case_start_time = 0.0
 
                 try:
                     self.shutdown_event.clear()
@@ -1432,7 +1440,7 @@ class TestSonicationDurationBase:
                             self.logger.error("Failed to start trigger.")
                             self.test_status = "error"
                             return
-                        test_case_start_time = time.time()
+                        self.test_case_start_time = time.time()
                     else:
                         self.logger.info("Simulated Trigger start... (no hardware)")
 
@@ -1507,8 +1515,8 @@ class TestSonicationDurationBase:
                             self.test_status = "error"
                 finally:
                     # Record test time
-                    # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
-                    duration = time.time() - test_case_start_time if test_case_start_time else 0.0
+                    # self.test_results[self.test_case_num].test_time_elapsed = time.time() - self.test_case_start_time if self.test_case_start_time else 0
+                    duration = time.time() - self.test_case_start_time if self.test_case_start_time else 0.0
                     self.test_results[self.test_case_num].test_time_elapsed = duration
 
                     # Power down and cleanup
