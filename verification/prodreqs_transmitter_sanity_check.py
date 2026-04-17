@@ -69,7 +69,7 @@ class TransmitterSanityCheck(TestSonicationDurationBase):
         self.logger.info("--------------------------------------------------------------------------------\n\n\n")
 
     def run(self) -> None:
-        self.test_status = "not started"
+        self.test_status = "starting pre-test checks"
 
         try:
             self._select_num_modules()

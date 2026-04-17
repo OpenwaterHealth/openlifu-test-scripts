@@ -213,6 +213,7 @@ class TestSonicationDurationBase:
         self.verbose = verbose
         self.quiet = quiet
         self.skip_logfile = skip_logfile
+        self.log_file_path = ""
         self.logger = self._setup_logging()
 
         # self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
@@ -260,6 +261,7 @@ class TestSonicationDurationBase:
             filename = f"{self.run_timestamp}_{TEST_ID}_{self.frequency_khz}kHz_{self.num_modules}x.log"
 
             log_path = self.log_dir / filename
+            self.log_file_path = str(log_path)  # Store as instance attribute for access by connector
 
             formatter = SafeFormatter(
                 "%(asctime)s - %(levelname)s - %(message)s",
@@ -271,7 +273,7 @@ class TestSonicationDurationBase:
             logging.getLogger(__name__).addHandler(file_handler)
 
             self._file_handler_attached = True
-            self.logger.info("Run log will be saved to: %s", log_path)
+            # self.logger.info("Run log will be saved to: %s", log_path)
         else:
             self.logger.info("User elected to skip logging to file - logs will only be output to console.")
 
@@ -1360,7 +1362,7 @@ class TestSonicationDurationBase:
 
     def run(self) -> None:
         """Execute the thermal stress test with graceful shutdown."""
-        self.test_status = "not started"
+        self.test_status = "starting pre-test checks"
 
         try:
             self._select_num_modules()
@@ -1558,6 +1560,7 @@ class TestSonicationDurationBase:
                         # self.print_test_summary()
                         # return
                     # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
+                    self.logger.info("Run log will be saved to: %s", log_path)
         except AbortTest:
             self.logger.warning("Test sequence aborted by user. Exiting remaining test cases.")
         finally:
