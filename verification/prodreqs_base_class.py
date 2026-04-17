@@ -185,7 +185,7 @@ class TestSonicationDurationBase:
         self.sequence_duration: float = TEST_CASE_DURATION_SECONDS
         self.starting_test_case: int = test_case
         self.test_results: dict[int, TestCaseResult] = {}
-        self.test_case_start_time: float | None = None
+        self.test_case_start_time: float | None = 0.0
         self.is_in_cooldown: bool = False
         self.cooldown_start_time: float | None = None
 
