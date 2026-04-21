@@ -346,23 +346,22 @@ class TestSonicationDurationBase:
         
         if self.interface is not None:
             self.logger.info("Using provided LIFUInterface instance.")
-            
+
             # Reconnect console UART
-            if not self.use_external_power and self.interface.hvcontroller and not self.interface.hvcontroller.uart.is_connected():
-                self.interface.hvcontroller.uart.check_usb_status()
-            
+            if not self.use_external_power and self.interface.hvcontroller and not self.interface.hvcontroller.uart.is_connected:
+                self.interface.hvcontroller.uart.connect()
+
             if not self.use_external_power and not self.interface.hvcontroller.get_12v_status():
                 self.logger.info("TX device not powered. Turning 12V on...")
                 self.interface.hvcontroller.turn_12v_on()
                 time.sleep(5)  # Give the TX board time to boot and mount to the USB bus
                 
             # Reconnect tx UART
-            if hasattr(self.interface, 'txdevice') and not self.interface.txdevice.uart.is_connected():
-                self.interface.txdevice.uart.check_usb_status()
-
+            if hasattr(self.interface, 'txdevice') and not self.interface.txdevice.uart.is_connected:
+                self.interface.txdevice.uart.connect()
             self.logger.info("TX uart port: %s, is_open: %s",
-                self.interface.txdevice.uart.port,
-                self.interface.txdevice.uart.serial.is_open if (self.interface.txdevice.uart.serial is not None) else "None"
+                self.interface.txdevice.uart._find_port(),
+                self.interface.txdevice.uart._serial.is_open if (self.interface.txdevice.uart._serial is not None) else "None"
             )
             return
             
@@ -1066,7 +1065,7 @@ class TestSonicationDurationBase:
 
             time.sleep(self.temperature_check_interval)
 
-        self.logger.warning("Console voltage shutdown triggered.")
+        self.logger.info("Console voltage monitoring shutdown triggered.")
         if not self.shutdown_event.is_set():
             self.shutdown_event.set()
             self.voltage_shutdown_event.set()
@@ -1186,7 +1185,7 @@ class TestSonicationDurationBase:
 
             time.sleep(self.temperature_check_interval)
         
-        self.logger.warning("Temperature shutdown triggered.")
+        self.logger.info("Temperature monitoring shutdown triggered.")
         if not self.shutdown_event.is_set():
             self.shutdown_event.set()
             self.temperature_shutdown_event.set()
@@ -1283,15 +1282,15 @@ class TestSonicationDurationBase:
             return
         try:
             self.logger.info("Closing device interface...")
-            with contextlib.suppress(Exception):
-                self.interface.stop_monitoring()
-            time.sleep(0.2)
+            # with contextlib.suppress(Exception):
+            #     self.interface.stop_monitoring()
+            # time.sleep(0.2)
             # Close the serial ports so Windows releases the handles
-            with contextlib.suppress(Exception):
-                self.interface.txdevice.uart.disconnect()
-            with contextlib.suppress(Exception):
-                if self.interface.hvcontroller:
-                    self.interface.hvcontroller.uart.disconnect()
+            # with contextlib.suppress(Exception):
+            #     self.interface.txdevice.uart.disconnect()
+            # with contextlib.suppress(Exception):
+            #     if self.interface.hvcontroller:
+            #         self.interface.hvcontroller.uart.disconnect()
         except Exception as e:
             self.logger.warning("Issue closing LIFU interface: %s", e)
 
@@ -1560,7 +1559,7 @@ class TestSonicationDurationBase:
                         # self.print_test_summary()
                         # return
                     # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
-                    self.logger.info("Run log will be saved to: %s", log_path)
+                    self.logger.info("Run log will be saved to: %s", self.log_file_path)
         except AbortTest:
             self.logger.warning("Test sequence aborted by user. Exiting remaining test cases.")
         finally:
