@@ -24,7 +24,7 @@ import numpy as np
 from .prodreqs_base_class import *
 from .config import *
 
-SELECTED_TEST_CASE_FOR_SANITY_CHECK = 10
+SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST = 5
 
 class TransmitterShortVerificationTest(TestSonicationDurationBase):
     def __init__(self, args):
@@ -50,7 +50,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
         )
         self.args = args
         self.sequence_duration = TEST_CASE_DURATION_SECONDS
-        self.test_case = SELECTED_TEST_CASE_FOR_SANITY_CHECK
+        self.test_case = SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST
 
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
