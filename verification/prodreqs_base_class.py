@@ -221,6 +221,12 @@ class TestSonicationDurationBase:
     def monitor_interface(self):
         asyncio.run(self.interface.start_monitoring(interval=1))
 
+    def _get_test_id(self) -> str:
+        module_name = getattr(self.__class__, "__module__", "")
+        if module_name:
+            return module_name.rsplit(".", 1)[-1]
+        return self.__class__.__name__
+
     def _setup_logging(self) -> logging.Logger:
         """Configure root logger with console output; file handler added later."""
         logger = logging.getLogger(__name__)
@@ -258,7 +264,8 @@ class TestSonicationDurationBase:
 
             self.log_dir.mkdir(parents=True, exist_ok=True)
 
-            filename = f"{self.run_timestamp}_{TEST_ID}_{self.frequency_khz}kHz_{self.num_modules}x.log"
+            test_id = self._get_test_id()
+            filename = f"{self.run_timestamp}_{test_id}_{self.frequency_khz}kHz_{self.num_modules}x.log"
 
             log_path = self.log_dir / filename
             self.log_file_path = str(log_path)  # Store as instance attribute for access by connector
