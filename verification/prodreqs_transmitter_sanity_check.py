@@ -26,7 +26,7 @@ from .config import *
 
 SELECTED_TEST_CASE_FOR_SANITY_CHECK = 10
 
-class TransmitterSanityCheck(TestSonicationDurationBase):
+class TransmitterShortVerificationTest(TestSonicationDurationBase):
     def __init__(self, args):
         super().__init__(
             frequency_khz=args.frequency,
@@ -254,7 +254,7 @@ def main() -> None:
 
     args = parse_arguments()
     args.test_runthrough = True
-    temp_and_voltage_stability_test = TransmitterSanityCheck(args)
+    temp_and_voltage_stability_test = TransmitterShortVerificationTest(args)
 
     try:
         temp_and_voltage_stability_test.run()
