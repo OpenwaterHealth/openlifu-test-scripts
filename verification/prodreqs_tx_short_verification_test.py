@@ -253,7 +253,7 @@ def main() -> None:
     """Main entry point for the script."""
 
     args = parse_arguments()
-    args.test_runthrough = True
+    # args.test_runthrough = True
     temp_and_voltage_stability_test = TransmitterShortVerificationTest(args)
 
     try:
