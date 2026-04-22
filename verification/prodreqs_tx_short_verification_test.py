@@ -14,13 +14,6 @@ from serial.serialutil import SerialException
 
 import numpy as np
 
-# import openlifu_sdk
-# from openlifu.bf.pulse import Pulse
-# from openlifu.bf.sequence import Sequence
-# from openlifu.db import Database
-# from openlifu.geo import Point
-# from openlifu.io.LIFUInterface import LIFUInterface
-# from openlifu.plan.solution import Solution
 from .prodreqs_base_class import *
 from .config import *
 
@@ -268,10 +261,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
             # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
             self.logger.info("Run log will be saved to: %s", self.log_file_path)
-
-
-        # self.logger.info(f"{self.sequence_duration//60} minutes of sonication complete.\n\n")
-            # self.print_test_summary()   
+            self.print_test_summary()   
 
 def main() -> None:
     """Main entry point for the script."""
