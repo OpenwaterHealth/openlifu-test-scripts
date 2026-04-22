@@ -67,6 +67,7 @@ def _base_path():
     if getattr(_sys, 'frozen', False):
         return _sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
+
 MIN_REQUIRED_CONSOLE_FW_VERSION = "1.2.4"
 MIN_REQUIRED_TX_FW_VERSION = "2.0.5"
 
@@ -982,6 +983,7 @@ class TestSonicationDurationBase:
     #             self.logger.error("SerialException encountered while reading console voltage: %s", e)
     #         except Exception as e:
     #             self.logger.error("Unexpected error while reading console voltage: %s", e)
+
 
     def monitor_console_voltage(self) -> None:
         """Thread target: monitor console voltage."""

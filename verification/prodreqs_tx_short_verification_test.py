@@ -69,6 +69,13 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
         self.logger.info("--------------------------------------------------------------------------------\n\n\n")
 
     def run(self) -> None:
+        # Reset events at run start so an abort request made during pre-checks
+        # is preserved through to execution instead of being cleared later.
+        self.shutdown_event.clear()
+        self.sequence_complete_event.clear()
+        self.temperature_shutdown_event.clear()
+        self.voltage_shutdown_event.clear()
+
         self.test_status = "starting pre-test checks"
 
         try:
@@ -108,10 +115,25 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
         try:
             if not self.hw_simulate:
                 self.connect_device()
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
                 self.verify_communication()
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
                 self.get_firmware_versions()
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
                 self.enumerate_devices()
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
                 self._verify_start_conditions(self.test_case_num, test_case_parameters["max_starting_temperature"])
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
             else:
                 self.logger.info("Hardware simulation enabled; skipping device configuration.")
 
@@ -123,9 +145,16 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
                 self.sequence_duration = TEST_CASE_DURATION_SECONDS
             
             self.configure_solution()
+            if self.shutdown_event.is_set():
+                self.test_status = "aborted by user"
+                return
 
             # Start sonication
             if not self.hw_simulate:
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    self.logger.info("Abort requested before starting trigger.")
+                    return
                 self.logger.info("Starting Trigger...")
                 if not self.interface.start_sonication():
                     self.logger.error("Failed to start trigger.")
@@ -139,11 +168,6 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             self.test_status = "running"
 
             # Start monitoring threads
-            self.shutdown_event.clear()
-            self.sequence_complete_event.clear()
-            self.temperature_shutdown_event.clear()
-            self.voltage_shutdown_event.clear()
-
             temp_thread = threading.Thread(
                 target=self.monitor_temperature,
                 name="TemperatureMonitorThread",
