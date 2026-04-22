@@ -261,7 +261,49 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
             # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
             self.logger.info("Run log will be saved to: %s", self.log_file_path)
-            self.print_test_summary()   
+            self.print_test_summary()
+
+    def print_test_summary(self) -> None:
+        self.logger.info("--------------------------------------------------------------------------------")
+        self.logger.info("\n\nTest Case Summary:\n")
+
+        r = self.test_results.get(self.test_case_num)
+        test_case_parameters = TEST_CASES[self.test_case_num - 1]
+        act_start  = f"{r.starting_temperature:.2f}C" if r and r.starting_temperature is not None else " -   "
+        final      = f"{r.final_temperature:.2f}C" if r and r.final_temperature is not None else " - "
+        max_dv     = f"{r.max_voltage_deviation_absolute:.2f}V" if r and r.max_voltage_deviation_absolute is not None else " - "
+        max_dv_pct = f"{r.max_voltage_deviation_percentage:.2f}%" if r and r.max_voltage_deviation_percentage is not None else " - "
+        cooldown   = f"~{r.cooldown_time_elapsed}m" if r and r.cooldown_time_elapsed is not None else " - "
+        dur        = format_hhmmss(r.test_time_elapsed) if r and r.test_time_elapsed is not None else " - "
+        status     = r.status if r and getattr(r, "status", None) else "NOT RUN"
+        
+        
+        self.logger.info(
+            f"Test Case {self.test_case_num:>2}: "
+            f"{test_case_parameters['voltage']:>2}V, "
+            f"{test_case_parameters['duty_cycle']:>2}% DC, "
+            f"{test_case_parameters['PRI_ms']:>2}ms PRI, "
+            f"Max Start Temp: {test_case_parameters['max_starting_temperature']:>2}C, "
+            f"Cooldown Time: {cooldown:>5}, "
+            f"Actual Start Temp: {act_start:>6}, "
+            f"Final Temp: {final:>6}, "
+            f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({VOLTAGE_DEVIATION_PERCENTAGE_LIMIT:>3}%), "
+            f"Actual Voltage Deviation: {max_dv:>5} ({max_dv_pct:>5}) "
+            f"Duration Run: {dur:>5}  --> {status}"
+        )
+
+        passed_count = sum(1 for r in self.test_results.values() if getattr(r, 'status', None) == "PASSED")
+
+        self.logger.info(
+            f"{passed_count} out of 1 test cases passed."
+        )
+
+        self.logger.info(f"Script ran for a total of {format_duration(time.time() - self.start_time)}.")
+
+        self.logger.info(
+            "\n\nOVERALL RESULT: %s\n",
+            "PASSED" if passed_count == 1 else "FAILED",
+        )   
 
 def main() -> None:
     """Main entry point for the script."""
