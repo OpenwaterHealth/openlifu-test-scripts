@@ -328,6 +328,9 @@ class TestSonicationDurationBase:
     def _select_starting_test_case(self) -> None:
         valid_test_nums = list(range(1, len(TEST_CASES) + 1))
 
+        self.starting_test_case = 1
+        return
+
         # Test case selection
         if self.starting_test_case is not None:
             return

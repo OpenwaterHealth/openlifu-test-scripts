@@ -70,20 +70,28 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
             for test_id, voltage in enumerate(TEST_VOLTAGES, start=1):
                 self.logger.info(f"Test Case {test_id}. {voltage}V")
 
-            while True:
-                choice = input(
-                    "Press enter to run through all test cases or "
-                    "select a test case by number to start at: "
-                )
-                if choice == "":
-                    self.starting_test_case = 1  # Start from beginning
-                    break
-                if choice.isdigit() and int(choice) in valid_test_nums:
-                    self.starting_test_case = int(choice)
-                    break
-                self.logger.info("Invalid selection. Please try again.")
+            # while True:
+            #     choice = input(
+            #         "Press enter to run through all test cases or "
+            #         "select a test case by number to start at: "
+            #     )
+            #     if choice == "":
+            #         self.starting_test_case = 1  # Start from beginning
+            #         break
+            #     if choice.isdigit() and int(choice) in valid_test_nums:
+            #         self.starting_test_case = int(choice)
+            #         break
+            #     self.logger.info("Invalid selection. Please try again.")
+            self.starting_test_case = 1  # Default to starting from the beginning if no valid input
 
     def run(self):
+        # Reset events at run start so an abort request made during pre-checks
+        # is preserved through to execution instead of being cleared later.
+        self.shutdown_event.clear()
+        self.sequence_complete_event.clear()
+        self.temperature_shutdown_event.clear()
+        self.voltage_shutdown_event.clear()
+
         try:
             self._select_starting_test_case()
             self._attach_file_handler()
@@ -108,15 +116,26 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                              self.voltage)
 
             self.test_case_start_time = 0.0
+            self.test_status = "not started"
 
             try:
+                # Clear events at the top of each iteration, matching base class behaviour
+                self.shutdown_event.clear()
+                self.sequence_complete_event.clear()
+                self.temperature_shutdown_event.clear()
+                self.voltage_shutdown_event.clear()
+
                 if not self.hw_simulate:
                     # self.connect_device()
                     self.verify_communication()
+                    if self.shutdown_event.is_set():
+                        continue
 
                     # if test has already run at least once, skip
                     if test_case == self.starting_test_case: 
                         self.get_firmware_versions()
+                        if self.shutdown_event.is_set():
+                            continue
                         # self.enumerate_devices()
                         
                     # self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
@@ -136,15 +155,11 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 self.logger.info("Running console voltage accuracy test under no-load conditions...")
                 self.interface.hvcontroller.set_voltage(self.voltage)
                 self.logger.info("Turning on HV for voltage accuracy test...")
+                if self.shutdown_event.is_set():
+                    continue
                 self.interface.hvcontroller.turn_hv_on()
                 self.test_case_start_time = time.time()
-
-
-                # Start monitoring threads
-                self.shutdown_event.clear()
-                self.sequence_complete_event.clear()
-                self.temperature_shutdown_event.clear()
-                self.voltage_shutdown_event.clear()
+                self.test_status = "running"
 
                 temp_thread = threading.Thread(
                     target=self.monitor_temperature,
@@ -246,6 +261,11 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 
                 self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
                 # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
+
+            # Check for abort before continuing to next case
+            if self.test_status == "aborted by user":
+                self.logger.info("Abort requested; exiting test sequence.")
+                break
 
         self.print_test_summary()
 

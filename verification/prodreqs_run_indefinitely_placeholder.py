@@ -80,6 +80,13 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def run(self) -> None:
         self.test_status = "not started"
 
+        # Reset events at run start so an abort request made during pre-checks
+        # is preserved through to execution instead of being cleared later.
+        self.shutdown_event.clear()
+        self.sequence_complete_event.clear()
+        self.temperature_shutdown_event.clear()
+        self.voltage_shutdown_event.clear()
+
         try:
             self._select_num_modules()
             self._select_frequency()
@@ -118,10 +125,25 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
             try:
                 if not self.hw_simulate:
                     self.connect_device()
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        return
                     self.verify_communication()
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        return
                     self.get_firmware_versions()
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        return
                     self.enumerate_devices()
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        return
                     self._verify_start_conditions(self.test_case_num, test_case_parameters["max_starting_temperature"])
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        return
                 else:
                     self.logger.info("Hardware simulation enabled; skipping device configuration.")
 
@@ -133,6 +155,9 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                 #     self.sequence_duration = TEST_CASE_DURATION_SECONDS
                 
                 self.configure_solution()
+                if self.shutdown_event.is_set():
+                    self.test_status = "aborted by user"
+                    return
 
                 # Start sonication
                 if not self.hw_simulate:
@@ -140,6 +165,10 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                     if not self.interface.start_sonication():
                         self.logger.error("Failed to start trigger.")
                         self.test_status = "error"
+                        return
+                    if self.shutdown_event.is_set():
+                        self.test_status = "aborted by user"
+                        self.logger.info("Abort requested before HV activation.")
                         return
                     self.test_case_start_time = time.time()
                 else:
@@ -253,6 +282,11 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                 
                 self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
                 # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
+
+            # Check for abort before continuing the loop
+            if self.test_status == "aborted by user":
+                self.logger.info("Abort requested; exiting indefinite loop.")
+                return
             
             self.logger.info(f"{self.sequence_duration//60} minutes of sonication complete. Will cool down for {TEST_CASE_COOLDOWN_SECONDS//60} minutes and then continue looping this test case.\n\n")
             # self.print_test_summary()   
