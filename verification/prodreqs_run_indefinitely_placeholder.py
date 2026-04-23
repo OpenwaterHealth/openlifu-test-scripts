@@ -122,6 +122,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
         test_case_start_time = 0
 
         while True:
+            self.test_status = "starting pre-test checks"
             try:
                 if not self.hw_simulate:
                     self.connect_device()

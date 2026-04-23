@@ -116,7 +116,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                              self.voltage)
 
             self.test_case_start_time = 0.0
-            self.test_status = "not started"
+            self.test_status = "starting pre-test checks"
 
             try:
                 # Clear events at the top of each iteration, matching base class behaviour
