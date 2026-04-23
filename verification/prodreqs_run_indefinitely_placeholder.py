@@ -21,8 +21,13 @@ import numpy as np
 # from openlifu.geo import Point
 # from openlifu.io.LIFUInterface import LIFUInterface
 # from openlifu.plan.solution import Solution
-from prodreqs_base_class import *
-from config import *
+from .prodreqs_base_class import *
+from .prodreqs_base_class import parse_arguments
+from .config import *
+# except ImportError:
+#     from prodreqs_base_class import *
+#     from prodreqs_base_class import parse_arguments
+#     from config import *
 
 SELECTED_TEST_CASE_FOR_INDEFINITE_RUN = 10
 TEST_CASE_DURATION_SECONDS = 20 * 60
@@ -30,7 +35,26 @@ TEST_CASE_COOLDOWN_SECONDS = 10 * 60
 
 class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def __init__(self, args):
-        super().__init__(args)
+        super().__init__(
+            frequency_khz=args.frequency,
+            num_modules=args.num_modules,
+            external_power=args.external_power,
+            simulate=args.simulate,
+            test_runthrough=args.test_runthrough,
+            console_shutoff_temp=args.console_shutoff_temp,
+            tx_shutoff_temp=args.tx_shutoff_temp,
+            ambient_shutoff_temp=args.ambient_shutoff_temp,
+            temperature_check_interval=args.temperature_check_interval,
+            temperature_log_interval=args.temperature_log_interval,
+            log_dir=args.log_dir,
+            verbose=args.verbose,
+            quiet=args.quiet,
+            skip_logfile=args.skip_logfile,
+            bypass_console_fw=args.bypass_console_fw,
+            bypass_tx_fw=args.bypass_tx_fw,
+            test_case=args.test_case,
+            interface=getattr(args, 'interface', None)
+        )
         self.args = args
         self.logger = self._setup_logging()
         self.sequence_duration = TEST_CASE_DURATION_SECONDS
@@ -39,7 +63,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
         self.logger.info("Number of modules: %d", self.num_modules)
-        test_case_parameters = TEST_CASES[self.test_case]
+        test_case_parameters = TEST_CASES[self.test_case - 1]
 
         self.logger.info("--------------------------------------------------------------------------------")
         self.logger.info(
@@ -117,7 +141,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                         self.logger.error("Failed to start trigger.")
                         self.test_status = "error"
                         return
-                    test_case_start_time = time.time()
+                    self.test_case_start_time = time.time()
                 else:
                     self.logger.info("Simulated Trigger start... (no hardware)")
 
@@ -192,7 +216,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
             finally:
                 # Record test time
                 # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
-                duration = time.time() - test_case_start_time if test_case_start_time else 0.0
+                duration = time.time() - self.test_case_start_time if self.test_case_start_time else 0.0
                 self.test_results[self.test_case_num].test_time_elapsed = duration
 
                 # Power down and cleanup

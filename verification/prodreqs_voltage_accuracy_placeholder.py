@@ -32,7 +32,26 @@ SEQUENCE_DURATION_SECONDS = 5
 class VoltageAccuracyTest(TestSonicationDurationBase):
     """Data class to hold voltage accuracy test results."""
     def __init__(self, args):
-        super().__init__(args)
+        super().__init__(
+            frequency_khz=args.frequency,
+            num_modules=args.num_modules,
+            external_power=args.external_power,
+            simulate=args.simulate,
+            test_runthrough=args.test_runthrough,
+            console_shutoff_temp=args.console_shutoff_temp,
+            tx_shutoff_temp=args.tx_shutoff_temp,
+            ambient_shutoff_temp=args.ambient_shutoff_temp,
+            temperature_check_interval=args.temperature_check_interval,
+            temperature_log_interval=args.temperature_log_interval,
+            log_dir=args.log_dir,
+            verbose=args.verbose,
+            quiet=args.quiet,
+            skip_logfile=args.skip_logfile,
+            bypass_console_fw=args.bypass_console_fw,
+            bypass_tx_fw=args.bypass_tx_fw,
+            test_case=args.test_case,
+            interface=getattr(args, 'interface', None)
+        )
         self.args = args
         self.max_voltage_deviation_absolute: float | None = None
         self.max_voltage_deviation_percentage: float | None = None
@@ -88,7 +107,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                              self.test_case_num, 
                              self.voltage)
 
-            test_case_start_time = 0
+            self.test_case_start_time = 0.0
 
             try:
                 if not self.hw_simulate:
@@ -118,6 +137,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 self.interface.hvcontroller.set_voltage(self.voltage)
                 self.logger.info("Turning on HV for voltage accuracy test...")
                 self.interface.hvcontroller.turn_hv_on()
+                self.test_case_start_time = time.time()
 
 
                 # Start monitoring threads
@@ -189,7 +209,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
             finally:
                 # Record test time
                 # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
-                duration = time.time() - test_case_start_time if test_case_start_time else 0.0
+                duration = time.time() - self.test_case_start_time if self.test_case_start_time else 0.0
                 self.test_results[self.test_case_num].test_time_elapsed = duration
 
                 # Power down and cleanup
