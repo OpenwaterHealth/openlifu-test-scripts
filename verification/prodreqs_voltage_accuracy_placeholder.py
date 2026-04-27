@@ -56,6 +56,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.max_voltage_deviation_percentage: float | None = None
         self.test_time_elapsed: float | None = None
         self.sequence_duration: float = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
+        self.voltage_deviation_percentage_limit = MAX_PERCENT_VOLTAGE_DEVIATION
         self.bypass_transmitter = True  # For voltage accuracy test, we can bypass TX communication
 
     def _select_starting_test_case(self) -> None:
@@ -304,7 +305,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
             self.logger.info(
                 f"Test Case {test_case:>2}: "
                 f"{test_case_parameters:>2}V, "
-                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({VOLTAGE_DEVIATION_PERCENTAGE_LIMIT:>3}%), "
+                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({self.voltage_deviation_percentage_limit:>3}%), "
                 f"Actual Voltage Deviation: {max_dv:>5} ({max_dv_pct:>5}) "
                 f"Duration Run: {dur:>5}  --> "
                 f"{status}" + ("\n" if test_case == len(TEST_VOLTAGES) / 2 else "")

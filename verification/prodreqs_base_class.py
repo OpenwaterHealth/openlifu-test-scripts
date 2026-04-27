@@ -201,6 +201,7 @@ class TestSonicationDurationBase:
         self.console_shutoff_temp_C = console_shutoff_temp
         self.tx_shutoff_temp_C = tx_shutoff_temp
         self.ambient_shutoff_temp_C = ambient_shutoff_temp
+        self.voltage_deviation_percentage_limit = VOLTAGE_DEVIATION_PERCENTAGE_LIMIT
         self.temperature_check_interval = temperature_check_interval
         self.temperature_log_interval = temperature_log_interval
 
@@ -1004,13 +1005,13 @@ class TestSonicationDurationBase:
         start_time = time.time()
         last_log_time = 0.0
 
-        deviation_limit_percentage = self.voltage * VOLTAGE_DEVIATION_PERCENTAGE_LIMIT / 100
+        deviation_limit_percentage = self.voltage * self.voltage_deviation_percentage_limit / 100
         deviation_limit_absolute_value = VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT
         deviation_limit_v = max(deviation_limit_percentage, deviation_limit_absolute_value)
         
         self.logger.info("  Voltage Deviation Limits: %.2f V (max of %.2f%% of %.2fV (%.2fV) or %.1f V) from expected %.2f V.",
                             deviation_limit_v,
-                            VOLTAGE_DEVIATION_PERCENTAGE_LIMIT,
+                            self.voltage_deviation_percentage_limit,
                             self.voltage,
                             deviation_limit_percentage,
                             deviation_limit_absolute_value,
@@ -1029,7 +1030,7 @@ class TestSonicationDurationBase:
                             return
                         console_voltage = self.interface.hvcontroller.get_voltage()
 
-                        deviation_limit_percentage = self.voltage * VOLTAGE_DEVIATION_PERCENTAGE_LIMIT / 100
+                        deviation_limit_percentage = self.voltage * self.voltage_deviation_percentage_limit / 100
                         deviation_limit_absolute_value = VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT
                         deviation_limit_v = max(deviation_limit_percentage, deviation_limit_absolute_value)
 
@@ -1050,7 +1051,7 @@ class TestSonicationDurationBase:
                                 deviation_pct,
                                 delta_v,
                                 deviation_limit_v,
-                                VOLTAGE_DEVIATION_PERCENTAGE_LIMIT,
+                                self.voltage_deviation_percentage_limit,
                                 deviation_limit_absolute_value,
                                 self.voltage,
                             )
@@ -1381,7 +1382,7 @@ class TestSonicationDurationBase:
                 f"Cooldown Time: {cooldown:>5}, "
                 f"Actual Start Temp: {act_start:>6}, "
                 f"Final Temp: {final:>6}, "
-                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({VOLTAGE_DEVIATION_PERCENTAGE_LIMIT:>3}%), "
+                f"Max Allowed Voltage Deviation: {VOLTAGE_DEVIATION_ABSOLUTE_VALUE_LIMIT:>3}V ({self.voltage_deviation_percentage_limit:>3}%), "
                 f"Actual Voltage Deviation: {max_dv:>5} ({max_dv_pct:>5}) "
                 f"Duration Run: {dur:>5}  --> "
                 f"{status}" + ("\n" if test_case == len(TEST_CASES) / 2 else "")
