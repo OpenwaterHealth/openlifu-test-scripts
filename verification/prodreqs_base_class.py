@@ -1105,6 +1105,9 @@ class TestSonicationDurationBase:
         tx_temp = None
         # time_elapsed = 0.0
 
+        def _fmt_temp(value):
+            return "N/A" if value is None else f"{value:.2f}C"
+
         while not self.shutdown_event.is_set():
             time_elapsed = time.time() - start_time
 
@@ -1157,17 +1160,13 @@ class TestSonicationDurationBase:
                 last_log_time = time_elapsed
                 if not self.use_external_power and con_temp is not None:
                     self.logger.info(
-                        "  Console Temp: %.2f°C, TX Temp: %.2f°C, Ambient Temp: %.2f°C",
-                        con_temp,
-                        tx_temp,
-                        amb_temp,
+                        "  Console Temp: %s, TX Temp: %s, Ambient Temp: %s",
+                        _fmt_temp(con_temp),
+                        _fmt_temp(tx_temp),
+                        _fmt_temp(amb_temp),
                     )
                 else:
-                    self.logger.info(
-                        "  TX Temp: %.2f°C, Ambient Temp: %.2f°C",
-                        tx_temp,
-                        amb_temp,
-                    )
+                    self.logger.info("  TX Temp: %s, Ambient Temp: %s", _fmt_temp(tx_temp), _fmt_temp(amb_temp))
 
             # Absolute temperature thresholds
             if (not self.use_external_power and con_temp is not None and
@@ -1179,7 +1178,7 @@ class TestSonicationDurationBase:
                 )
                 break
 
-            if tx_temp > self.tx_shutoff_temp_C:
+            if tx_temp is not None and tx_temp > self.tx_shutoff_temp_C:
                 self.logger.warning(
                     "TX device temperature %.2f°C exceeds shutoff threshold %.2f°C.",
                     tx_temp,
@@ -1187,7 +1186,7 @@ class TestSonicationDurationBase:
                 )
                 break
 
-            if amb_temp > self.ambient_shutoff_temp_C:
+            if amb_temp is not None and amb_temp > self.ambient_shutoff_temp_C:
                 self.logger.warning(
                     "Ambient temperature %.2f°C exceeds shutoff threshold %.2f°C.",
                     amb_temp,
@@ -1202,9 +1201,32 @@ class TestSonicationDurationBase:
             self.shutdown_event.set()
             self.temperature_shutdown_event.set()
 
+    def _read_temperature_with_retry(self, max_attempts: int = 5, retry_delay_s: float = 2.0) -> float | None:
+        """Attempt to read TX temperature, retrying on transient None returns.
+
+        Returns the temperature (float) on success, or None if all attempts fail.
+        """
+        for attempt in range(1, max_attempts + 1):
+            temp = self.interface.txdevice.get_temperature()
+            if temp is not None:
+                return temp
+            if attempt < max_attempts:
+                self.logger.warning(
+                    "TX temperature read returned None (attempt %d/%d). Retrying in %.0fs...",
+                    attempt, max_attempts, retry_delay_s,
+                )
+                # Honour a shutdown request while waiting between retries
+                if self.shutdown_event.wait(retry_delay_s):
+                    return None
+        self.logger.error(
+            "TX temperature read returned None after %d attempts — possible connection issue.",
+            max_attempts,
+        )
+        return None
+
     def _verify_start_conditions(self, test_case, starting_temperature) -> None:
         """Monitor cooldown period before starting the test."""
-        temp = self.interface.txdevice.get_temperature()  # Initial read to populate temperature
+        temp = self._read_temperature_with_retry()  # Initial read with retry for transient failures
         self.logger.info(f"Initial TX temperature: {temp}C")
 
         if self.test_runthrough:
@@ -1212,12 +1234,19 @@ class TestSonicationDurationBase:
             self.logger.info(f"Test runthrough mode enabled - starting temp set to {starting_temperature}C.")
 
         counter = 0
-        while temp > starting_temperature:
+        while temp is None or temp > starting_temperature:
             self.is_in_cooldown = True
             self.cooldown_start_time = time.time()
-            self.logger.info(f"Current temperature of {temp}C is greater than max starting "
-                             f"temperature of {starting_temperature}C for test case {test_case}. "
-                             f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again.")
+            if temp is None:
+                self.logger.warning(
+                    "TX temperature read returned None after retries before test case %s. Cooling/retrying in %s minutes.",
+                    test_case,
+                    TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60,
+                )
+            else:
+                self.logger.info(f"Current temperature of {temp}C is greater than max starting "
+                                 f"temperature of {starting_temperature}C for test case {test_case}. "
+                                 f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again.")
             self.turn_off_console_and_tx()
             self.cleanup_interface()
 
@@ -1230,7 +1259,7 @@ class TestSonicationDurationBase:
             
             self.connect_device()
             self.verify_communication()
-            temp = self.interface.txdevice.get_temperature()  # Update temperature after cooldown
+            temp = self._read_temperature_with_retry()  # Retry after reconnect too
             counter += 1
         
         self.is_in_cooldown = False

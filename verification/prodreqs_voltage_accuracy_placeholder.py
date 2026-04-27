@@ -27,7 +27,6 @@ from .config import *
 # config.py
 TEST_VOLTAGES = [65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
 MAX_PERCENT_VOLTAGE_DEVIATION = 2.0
-SEQUENCE_DURATION_SECONDS = 5
 
 class VoltageAccuracyTest(TestSonicationDurationBase):
     """Data class to hold voltage accuracy test results."""
@@ -40,7 +39,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
             test_runthrough=args.test_runthrough,
             console_shutoff_temp=args.console_shutoff_temp,
             tx_shutoff_temp=args.tx_shutoff_temp,
-            ambient_shutoff_temp=args.ambient_shutoff_temp,
+            ambient_shutoff_temp=args.ambient_shutoff_temp, 
             temperature_check_interval=args.temperature_check_interval,
             temperature_log_interval=args.temperature_log_interval,
             log_dir=args.log_dir,
@@ -56,7 +55,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
         self.max_voltage_deviation_absolute: float | None = None
         self.max_voltage_deviation_percentage: float | None = None
         self.test_time_elapsed: float | None = None
-        self.sequence_duration: float = SEQUENCE_DURATION_SECONDS
+        self.sequence_duration: float = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
         self.bypass_transmitter = True  # For voltage accuracy test, we can bypass TX communication
 
     def _select_starting_test_case(self) -> None:
