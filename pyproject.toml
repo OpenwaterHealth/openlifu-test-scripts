@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openlifu-test-scripts"
-version = "1.1.0"
+version = "1.1.1"
 authors = [
   { name = "Alex Kagan", email = "akagan@openwater.cc" },
 ]
