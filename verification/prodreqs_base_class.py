@@ -125,7 +125,6 @@ class AbortTest(Exception):
     """Custom exception to signal test abortion."""
     pass
 
-
 class TestSonicationDurationBase:
     """Main class for Thermal Stress Test 5."""
     def __init__(
@@ -921,12 +920,15 @@ class TestSonicationDurationBase:
                             self.logger.warning(f"  Nested unexpected dict found at solution['{key}']['{k2}']: {v2}")
 
         trigger_mode = "Continuous"
-        
-        try:
+
+        def _set_solution() -> None:
             self.interface.set_solution(
                 solution=solution,
                 trigger_mode=trigger_mode,
             )
+
+        try:
+            self._retry_operation("set_solution", _set_solution, final_log_level="error")
         except Exception as e:
             self.logger.error(f"Error calling set_solution(): {type(e).__name__}: {e}")
             import traceback
@@ -971,6 +973,43 @@ class TestSonicationDurationBase:
         self._loaded_solution_data = None
         self._solution_name = ""
         self.logger.info("Solution unloaded. Will generate solutions based on parameters.")
+
+    def _retry_operation(
+        self,
+        operation_name: str,
+        func,
+        *,
+        attempts: int = MAX_OPERATION_RETRIES,
+        retry_delay_s: float = RETRY_DELAY_SECONDS,
+        final_log_level: str = "error",
+    ):
+        """Run an operation with bounded retries and a shutdown-aware delay."""
+        last_exception = None
+
+        for attempt in range(1, attempts + 1):
+            if self.shutdown_event.is_set():
+                raise AbortTest()
+
+            try:
+                return func()
+            except AbortTest:
+                raise
+            except Exception as exc:
+                last_exception = exc
+                log_method = self.logger.warning if attempt < attempts else getattr(self.logger, final_log_level, self.logger.error)
+                log_method(
+                    "%s failed on attempt %d/%d: %s: %s",
+                    operation_name,
+                    attempt,
+                    attempts,
+                    type(exc).__name__,
+                    exc,
+                )
+                if attempt < attempts and self.shutdown_event.wait(retry_delay_s):
+                    raise AbortTest()
+
+        if last_exception is not None:
+            raise last_exception
 
     # def test_console_voltage_accuracy_no_load(self) -> None:
     #     """Test console voltage accuracy under no-load conditions."""
