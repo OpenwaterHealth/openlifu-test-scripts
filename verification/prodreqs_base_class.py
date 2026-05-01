@@ -1158,11 +1158,11 @@ class TestSonicationDurationBase:
                         with self.mutex:
                             if self.shutdown_event.is_set():
                                 return
-                            prev_con_temp = self.interface.hvcontroller.get_temperature1()
+                            prev_con_temp = self._read_temperature_with_retry(reading="console")
                     with self.mutex:
                         if self.shutdown_event.is_set():
                             return
-                        con_temp = self.interface.hvcontroller.get_temperature1()
+                        con_temp = self._read_temperature_with_retry(reading="console")
                 else:
                     con_temp = None
 
@@ -1170,22 +1170,22 @@ class TestSonicationDurationBase:
                     with self.mutex:
                         if self.shutdown_event.is_set():
                             return
-                        prev_tx_temp = self.interface.txdevice.get_temperature()
+                        prev_tx_temp = self._read_temperature_with_retry(reading="tx")
                 with self.mutex:
                     if self.shutdown_event.is_set():
                         return
-                    tx_temp = self.interface.txdevice.get_temperature()
+                    tx_temp = self._read_temperature_with_retry(reading="tx")
                     self.test_results[self.test_case_num].final_temperature = tx_temp
 
                 if prev_amb_temp is None:
                     with self.mutex:
                         if self.shutdown_event.is_set():
                             return
-                        prev_amb_temp = self.interface.txdevice.get_ambient_temperature()
+                        prev_amb_temp = self._read_temperature_with_retry(reading="tx_ambient")
                 with self.mutex:  
                     if self.shutdown_event.is_set():
                         return  
-                    amb_temp = self.interface.txdevice.get_ambient_temperature()
+                    amb_temp = self._read_temperature_with_retry(reading="tx_ambient")
 
             except SerialException as e:
                 self.logger.error("SerialException encountered while reading temperatures: %s", e)
@@ -1241,18 +1241,33 @@ class TestSonicationDurationBase:
             self.shutdown_event.set()
             self.temperature_shutdown_event.set()
 
-    def _read_temperature_with_retry(self, max_attempts: int = 5, retry_delay_s: float = 2.0) -> float | None:
-        """Attempt to read TX temperature, retrying on transient None returns or read failures.
+    def _read_temperature_with_retry(self, reading: str = "", max_attempts: int = 5, retry_delay_s: float = 2.0) -> float | None:
+        """Attempt to read a temperature value, retrying on transient None returns or read failures.
 
-        Returns the temperature (float) on success, or None if all attempts fail.
+        Args:
+            reading: A string indicating which temperature to read ("tx", "ambient", or "console") for logging purposes.
+            max_attempts: Maximum number of read attempts before giving up.
+            retry_delay_s: Delay in seconds between retry attempts.
+
+        Returns:
+            The temperature (float) on success, or None if all attempts fail.
         """
         for attempt in range(1, max_attempts + 1):
             try:
-                temp = self.interface.txdevice.get_temperature()
+                if reading == "tx":
+                    temp = self.interface.txdevice.get_temperature()
+                elif reading == "tx_ambient":
+                    temp = self.interface.txdevice.get_ambient_temperature()
+                elif reading == "console":
+                    temp = self.interface.hvcontroller.get_temperature1()
+                else:
+                    self.logger.error(f"Invalid temperature type specified for retry: '{reading}'")
+                    return None
             except Exception as e:
                 if attempt < max_attempts:
                     self.logger.warning(
-                        "TX temperature read failed (attempt %d/%d): %s. Retrying in %.0fs...",
+                        "%s temperature read failed (attempt %d/%d): %s. Retrying in %.0fs...",
+                        reading or "Temperature",
                         attempt,
                         max_attempts,
                         e,
@@ -1263,7 +1278,8 @@ class TestSonicationDurationBase:
                     continue
 
                 self.logger.error(
-                    "TX temperature read failed after %d attempts: %s",
+                    "%s temperature read failed after %d attempts: %s",
+                    reading or "Temperature",
                     max_attempts,
                     e,
                 )
@@ -1273,21 +1289,67 @@ class TestSonicationDurationBase:
                 return temp
             if attempt < max_attempts:
                 self.logger.warning(
-                    "TX temperature read returned None (attempt %d/%d). Retrying in %.0fs...",
-                    attempt, max_attempts, retry_delay_s,
+                    "%s temperature read returned None (attempt %d/%d). Retrying in %.0fs...",
+                    reading or "Temperature", attempt, max_attempts, retry_delay_s,
                 )
                 # Honour a shutdown request while waiting between retries
                 if self.shutdown_event.wait(retry_delay_s):
                     return None
         self.logger.error(
-            "TX temperature read returned None after %d attempts — possible connection issue.",
+            "%s temperature read returned None after %d attempts - possible connection issue.",
+            reading or "Temperature",
             max_attempts,
         )
         return None
 
+
+    # def _read_temperature_with_retry(self, max_attempts: int = 5, retry_delay_s: float = 2.0) -> float | None:
+    #     """Attempt to read TX temperature, retrying on transient None returns or read failures.
+
+    #     Returns the temperature (float) on success, or None if all attempts fail.
+    #     """
+    #     for attempt in range(1, max_attempts + 1):
+    #         try:
+    #             temp = self.interface.txdevice.get_temperature()
+    #         except Exception as e:
+    #             if attempt < max_attempts:
+    #                 self.logger.warning(
+    #                     "TX temperature read failed (attempt %d/%d): %s. Retrying in %.0fs...",
+    #                     attempt,
+    #                     max_attempts,
+    #                     e,
+    #                     retry_delay_s,
+    #                 )
+    #                 if self.shutdown_event.wait(retry_delay_s):
+    #                     return None
+    #                 continue
+
+    #             self.logger.error(
+    #                 "TX temperature read failed after %d attempts: %s",
+    #                 max_attempts,
+    #                 e,
+    #             )
+    #             return None
+
+    #         if temp is not None:
+    #             return temp
+    #         if attempt < max_attempts:
+    #             self.logger.warning(
+    #                 "TX temperature read returned None (attempt %d/%d). Retrying in %.0fs...",
+    #                 attempt, max_attempts, retry_delay_s,
+    #             )
+    #             # Honour a shutdown request while waiting between retries
+    #             if self.shutdown_event.wait(retry_delay_s):
+    #                 return None
+    #     self.logger.error(
+    #         "TX temperature read returned None after %d attempts — possible connection issue.",
+    #         max_attempts,
+    #     )
+    #     return None
+
     def _verify_start_conditions(self, test_case, starting_temperature) -> None:
         """Monitor cooldown period before starting the test."""
-        temp = self._read_temperature_with_retry()  # Initial read with retry for transient failures
+        temp = self._read_temperature_with_retry(reading="tx")  # Initial read with retry for transient failures
         self.logger.info(f"Initial TX temperature: {temp}C")
 
         if self.test_runthrough:
@@ -1320,7 +1382,7 @@ class TestSonicationDurationBase:
             
             self.connect_device()
             self.verify_communication()
-            temp = self._read_temperature_with_retry()  # Retry after reconnect too
+            temp = self._read_temperature_with_retry(reading="tx")  # Retry after reconnect too
             counter += 1
         
         self.is_in_cooldown = False
