@@ -32,4 +32,4 @@ Homepage = "https://github.com/OpenwaterHealth/openlifu-test-scripts"
 "Bug Tracker" = "https://github.com/OpenwaterHealth/openlifu-test-scripts/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["verification"]
+packages = ["openlifu_verification"]
