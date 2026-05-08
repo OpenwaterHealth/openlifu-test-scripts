@@ -17,7 +17,7 @@ import numpy as np
 from .prodreqs_base_class import *
 from .config import *
 
-SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST = 5
+SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST = 2
 
 class TransmitterShortVerificationTest(TestSonicationDurationBase):
     def __init__(self, args):
