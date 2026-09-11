@@ -33,3 +33,11 @@ Homepage = "https://github.com/OpenwaterHealth/openlifu-test-scripts"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openlifu_verification"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "openlifu_verification/",
+  "README.md",
+  "LICENSE",
+  "pyproject.toml",
+]
