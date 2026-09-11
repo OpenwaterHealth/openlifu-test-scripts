@@ -20,6 +20,7 @@ import threading
 import time
 import asyncio
 import json
+import base58
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ import numpy as np
 # from openlifu_sdk import LIFUInterface
 import openlifu_sdk
 from openlifu_sdk.io import LIFUInterface
+from openlifu_sdk.io.LIFUConfig import HW_ID_DATA_LENGTH
 # from openlifu.bf.pulse import Pulse
 # from openlifu.bf.sequence import Sequence
 # from openlifu.db import Database
@@ -48,7 +50,7 @@ except ImportError:
 """
 Thermal Stress Test Script
 - User selects a test case.
-- Test runs for a fixed total duration or until a thermal shutdown occurs.
+- Test runs for a fixed total duration or until a thersequence_time_selectionmal shutdown occurs.
 - Logs temperature and device status.
 """
 
@@ -215,6 +217,10 @@ class TestSonicationDurationBase:
         self.quiet = quiet
         self.skip_logfile = skip_logfile
         self.log_file_path = ""
+        self._file_handler = None
+        self.console_hwid = ""
+        self.tx_hwids: list[str] = []
+        self.tx_module_ids: list[str | None] = []
         self.logger = self._setup_logging()
 
         # self.logger.debug(f"{TEST_ID} initialized with arguments: {self.args}")
@@ -279,11 +285,100 @@ class TestSonicationDurationBase:
             file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
             file_handler.setFormatter(formatter)
             logging.getLogger(__name__).addHandler(file_handler)
+            self._file_handler = file_handler
 
             self._file_handler_attached = True
             # self.logger.info("Run log will be saved to: %s", log_path)
         else:
             self.logger.info("User elected to skip logging to file - logs will only be output to console.")
+
+    @staticmethod
+    def _safe_filename_part(value: str) -> str:
+        return "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
+
+    @staticmethod
+    def _display_hwid(component, module: int = 0) -> str:
+        """Return the same Base58 HWID representation used by the GUI."""
+        raw_hwid = component.get_hardware_id(module=module, raw_hex=True)
+        if not raw_hwid:
+            return "N_A"
+        if len(raw_hwid) > HW_ID_DATA_LENGTH:
+            return base58.b58encode(bytes.fromhex(raw_hwid[:HW_ID_DATA_LENGTH])).decode("utf-8")
+        return raw_hwid
+
+    def _record_hardware_ids_and_rename_log(self) -> None:
+        """Log console/TX HWIDs and add them to the already-open log filename."""
+        if self.interface is None:
+            return
+
+        console_hwid = "external"
+        if not self.use_external_power and self.interface.hvcontroller is not None:
+            try:
+                console_hwid = self._display_hwid(self.interface.hvcontroller)
+            except Exception as exc:
+                self.logger.warning("Unable to read console HWID: %s", exc)
+                console_hwid = "unknown-console"
+
+        tx_hwids = []
+        tx_module_ids = []
+        if not self.bypass_transmitter and self.interface.txdevice is not None:
+            for module in range(self.num_modules or 0):
+                try:
+                    tx_hwids.append(self._display_hwid(self.interface.txdevice, module=module))
+                except Exception as exc:
+                    self.logger.warning("Unable to read TX %d HWID: %s", module, exc)
+                    tx_hwids.append(f"unknown-tx{module}")
+                module_id = None
+                try:
+                    user_config = self.interface.txdevice.read_config(module=module)
+                    config_data = user_config.to_dict()
+                    module_data = config_data.get("module")
+                    if isinstance(module_data, dict) and module_data.get("id") is not None:
+                        module_id = str(module_data["id"]).strip() or None
+                except Exception as exc:
+                    self.logger.info("No readable TX %d user-config module ID: %s", module, exc)
+                tx_module_ids.append(module_id)
+
+        self.console_hwid = console_hwid
+        self.tx_hwids = tx_hwids
+        self.tx_module_ids = tx_module_ids
+        self.logger.info("Console HWID: %s", console_hwid)
+        for module, hwid in enumerate(tx_hwids):
+            self.logger.info("TX Device %d HWID: %s", module, hwid)
+            if tx_module_ids[module] is not None:
+                self.logger.info("TX Device %d module ID: %s", module, tx_module_ids[module])
+            else:
+                self.logger.info("TX Device %d: no module ID found on device, using Base58 HWID.", module)
+
+        if not self._file_handler or not self.log_file_path:
+            return
+
+        old_path = Path(self.log_file_path)
+        test_id = self._get_test_id()
+        identity_part = "CON_" + self._safe_filename_part(console_hwid)
+        for module, hwid in enumerate(tx_hwids):
+            identity = tx_module_ids[module] if tx_module_ids[module] is not None else hwid
+            identity_part += "_TX_" + self._safe_filename_part(identity)
+        new_path = old_path.with_name(
+            f"{self.run_timestamp}_{identity_part}_{test_id}_"
+            f"{self.frequency_khz}kHz_{self.num_modules}x.log"
+        )
+
+        logger = logging.getLogger(__name__)
+        formatter = self._file_handler.formatter
+        logger.removeHandler(self._file_handler)
+        self._file_handler.close()
+        try:
+            old_path.replace(new_path)
+        except OSError as exc:
+            self.logger.warning("Unable to rename log with hardware IDs: %s", exc)
+            new_path = old_path
+
+        new_handler = logging.FileHandler(new_path, mode="a", encoding="utf-8")
+        new_handler.setFormatter(formatter)
+        logger.addHandler(new_handler)
+        self._file_handler = new_handler
+        self.log_file_path = str(new_path)
 
 
 
@@ -354,6 +449,17 @@ class TestSonicationDurationBase:
 
     def connect_device(self) -> None:
         """Connect to the LIFU device and verify connection."""
+
+        if self.hw_simulate:
+            if self.interface is None:
+                from openlifu_sdk.ui.simulated_interface import SimulatedLIFUInterface
+                self.interface = SimulatedLIFUInterface(
+                    num_modules=self.num_modules or 1,
+                    voltage_table_selection="stress_test_evt0",
+                )
+                self.interface.txdevice.emit_connected()
+                self.interface.hvcontroller.emit_connected()
+            return
         
         if self.interface is not None:
             self.logger.info("Using provided LIFUInterface instance.")
@@ -378,10 +484,9 @@ class TestSonicationDurationBase:
             
         self.interface = LIFUInterface(
             ext_power_supply=self.use_external_power,
-            TX_test_mode=self.hw_simulate,
-            HV_test_mode=self.hw_simulate,
-            voltage_table_selection="evt0",
-            sequence_time_selection="stress_test",
+            TX_test_mode=False,
+            HV_test_mode=False,
+            voltage_table_selection="stress_test_evt0",
             run_async=True
         )
         time.sleep(2)
@@ -392,17 +497,17 @@ class TestSonicationDurationBase:
         monitor_thread.daemon = True
         monitor_thread.start()
 
-        self.interface._tx_uart.signal_connect.connect(
+        self.interface.txdevice.signal_connected.connect(
             lambda desc, port: self.logger.info("TX connected on %s", port)
         )
-        self.interface._tx_uart.signal_disconnect.connect(
+        self.interface.txdevice.signal_disconnected.connect(
             lambda desc, port: self.logger.info("TX disconnected from %s", port)
         )
-        if self.interface._hv_uart is not None:
-            self.interface._hv_uart.signal_connect.connect(
+        if self.interface.hvcontroller is not None:
+            self.interface.hvcontroller.signal_connected.connect(
                 lambda desc, port: self.logger.info("HV connected on %s", port)
             )
-            self.interface._hv_uart.signal_disconnect.connect(
+            self.interface.hvcontroller.signal_disconnected.connect(
                 lambda desc, port: self.logger.info("HV disconnected from %s", port)
             )
             
@@ -425,27 +530,14 @@ class TestSonicationDurationBase:
                 self.logger.error("Error turning on 12V after 3 attempts: %s", e)
             time.sleep(2)
 
-            # Reinitialize interface after powering 12V
-            try:
-                self.interface.stop_monitoring()
-            except Exception as e:
-                self.logger.warning("Error stopping monitoring during reinit: %s", e)
-
-            # with contextlib.suppress(Exception):
-            #     del self.interface
-
-            # time.sleep(1)
-            # self.logger.info("Reinitializing LIFU interface after powering 12V...")
-            # self.interface = LIFUInterface(
-            #     ext_power_supply=self.use_external_power,
-            #     TX_test_mode=self.hw_simulate,
-            #     HV_test_mode=self.hw_simulate,
-            #     voltage_table_selection="evt0",
-            #     sequence_time_selection="stress_test",
-            #     run_async=True
-            # )
-            # tx_connected, hv_connected = self.interface.is_device_connected()
-            tx_connected, hv_connected = self.interface.is_device_connected()
+            # Keep monitoring active while the TX board boots. Stopping the
+            # monitor here can transiently mark the already-connected HV UART
+            # as disconnected just as the TX reconnects.
+            for _ in range(10):
+                tx_connected, hv_connected = self.interface.is_device_connected()
+                if tx_connected and (self.use_external_power or hv_connected):
+                    break
+                time.sleep(1)
 
         if not self.use_external_power:
             if hv_connected:
@@ -533,6 +625,8 @@ class TestSonicationDurationBase:
             if tx_fw_mismatch:
                 self.logger.error("\n\n!! Incompatible TX firmware version, please upgrade to %s !!\n\n", MIN_REQUIRED_TX_FW_VERSION)
             sys.exit()
+
+        self._record_hardware_ids_and_rename_log()
 
     def enumerate_devices(self):
         """Enumerate TX7332 devices and verify count."""
@@ -1541,6 +1635,7 @@ class TestSonicationDurationBase:
                         self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
                     else:
                         self.logger.info("Hardware simulation enabled; skipping device configuration.")
+                        self.connect_device()
 
                     if self.test_runthrough:
                         self.sequence_duration = SHORT_TEST_DURATION_SECONDS
@@ -1671,7 +1766,7 @@ class TestSonicationDurationBase:
                             "TEST CASE %d FAILED due to unexpected error.",
                             self.test_case_num,
                         )
-                        self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                        self.test_results[self.test_case_num].status = "FAILED (unexpected error)"
                     
                     self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
 

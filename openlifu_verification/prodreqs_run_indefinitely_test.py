@@ -30,6 +30,7 @@ from .config import *
 #     from config import *
 
 SELECTED_TEST_CASE_FOR_INDEFINITE_RUN = 10
+INDEFINITE_TEST_DUTY_CYCLE_PERCENT = 5
 TEST_CASE_DURATION_SECONDS = 20 * 60
 TEST_CASE_COOLDOWN_SECONDS = 10 * 60
 
@@ -63,7 +64,8 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
         self.logger.info("Number of modules: %d", self.num_modules)
-        test_case_parameters = TEST_CASES[self.test_case - 1]
+        test_case_parameters = dict(TEST_CASES[self.test_case - 1])
+        test_case_parameters["duty_cycle"] = INDEFINITE_TEST_DUTY_CYCLE_PERCENT
 
         self.logger.info("--------------------------------------------------------------------------------")
         self.logger.info(
@@ -103,7 +105,8 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
         # for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case-1:], start=self.starting_test_case):
 
         self.test_case_num = self.test_case
-        test_case_parameters = TEST_CASES[self.test_case_num-1]
+        test_case_parameters = dict(TEST_CASES[self.test_case_num - 1])
+        test_case_parameters["duty_cycle"] = INDEFINITE_TEST_DUTY_CYCLE_PERCENT
 
         self.test_results[self.test_case_num] = TestCaseResult()
         self.voltage = float(test_case_parameters["voltage"])
@@ -121,8 +124,8 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
 
         test_case_start_time = 0
 
-        while True:
-            self.test_status = "starting pre-test checks"
+        self.test_status = "starting pre-test checks"
+        try:
             try:
                 if not self.hw_simulate:
                     self.connect_device()
@@ -163,7 +166,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                 # Start sonication
                 if not self.hw_simulate:
                     self.logger.info("Starting Trigger...")
-                    if not self.interface.start_sonication():
+                    if not self.interface.start_sonication(wait_for_settle=False):
                         self.logger.error("Failed to start trigger.")
                         self.test_status = "error"
                         return
@@ -189,11 +192,6 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                     name="TemperatureMonitorThread",
                     # daemon=True,
                 )
-                completion_thread = threading.Thread(
-                    target=self.exit_on_time_complete,
-                    name="SequenceCompletionThread",
-                    # daemon=True,
-                )
                 voltage_thread = threading.Thread(
                     target=self.monitor_console_voltage,
                     name="ConsoleVoltageMonitorThread",
@@ -202,7 +200,6 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                 
                 voltage_thread.start()
                 temp_thread.start()
-                completion_thread.start()
 
                 # Wait for threads or user interrupt
                 try:
@@ -228,22 +225,23 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                     except Exception as e:
                         self.logger.error("Error stopping trigger: %s", e)
 
-                # Wait for threads to exit gracefully
+                # Wait for monitoring threads to exit gracefully. The
+                # indefinite test has no completion thread: it remains
+                # active until Stop or a safety monitor requests shutdown.
                 temp_thread.join(timeout=5.0)
                 voltage_thread.join(timeout=5.0)
-                completion_thread.join(timeout=5.0)
 
                 # Determine final status
                 if self.test_status not in ("aborted by user", "error"):
-                    if self.sequence_complete_event.is_set():
-                        self.test_status = "passed"
-                    elif self.temperature_shutdown_event.is_set():
+                    if self.temperature_shutdown_event.is_set():
                         self.test_status = "temperature shutdown"
                     elif self.voltage_shutdown_event.is_set():
                         self.test_status = "voltage deviation"
                     else:
                         self.test_status = "error"
             finally:
+                pass
+        finally:
                 # Record test time
                 # self.test_results[self.test_case_num].test_time_elapsed = time.time() - test_case_start_time if test_case_start_time else 0
                 duration = time.time() - self.test_case_start_time if self.test_case_start_time else 0.0
@@ -284,13 +282,7 @@ class TransmitterIndefiniteRun(TestSonicationDurationBase):
                 self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
                 # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
 
-            # Check for abort before continuing the loop
-            if self.test_status == "aborted by user":
-                self.logger.info("Abort requested; exiting indefinite loop.")
-                return
-            
-            self.logger.info(f"{self.sequence_duration//60} minutes of sonication complete. Will cool down for {TEST_CASE_COOLDOWN_SECONDS//60} minutes and then continue looping this test case.\n\n")
-            # self.print_test_summary()   
+        self.logger.info("Indefinite sonication ended; no automatic restart will be performed.")
 
 def main() -> None:
     """Main entry point for the script."""

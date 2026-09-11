@@ -14,8 +14,14 @@ from serial.serialutil import SerialException
 
 import numpy as np
 
-from .prodreqs_base_class import *
-from .config import *
+try:
+    from .prodreqs_base_class import *
+except ImportError:
+    from prodreqs_base_class import *
+try:
+    from .config import *
+except ImportError:
+    from config import *
 
 SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST = 2
 
@@ -48,7 +54,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
     def print_banner(self) -> None:
         self.logger.info("Selected frequency: %dkHz", self.frequency_khz)
         self.logger.info("Number of modules: %d", self.num_modules)
-        test_case_parameters = TEST_CASES[self.test_case]
+        test_case_parameters = TEST_CASES[self.test_case - 1]
 
         self.logger.info("--------------------------------------------------------------------------------")
         self.logger.info(
@@ -129,6 +135,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
                     return
             else:
                 self.logger.info("Hardware simulation enabled; skipping device configuration.")
+                self.connect_device()
 
             if self.test_runthrough:
                 self.sequence_duration = SHORT_TEST_DURATION_SECONDS
@@ -256,7 +263,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
                     "TEST CASE %d FAILED due to unexpected error.",
                     self.test_case_num,
                 )
-                self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                self.test_results[self.test_case_num].status = "FAILED (unexpected error)"
             
             self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
             # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0

@@ -21,8 +21,15 @@ import numpy as np
 # from openlifu.geo import Point
 # from openlifu.io.LIFUInterface import LIFUInterface
 # from openlifu.plan.solution import Solution
-from .prodreqs_base_class import *
-from .config import *
+
+try:
+    from .prodreqs_base_class import *
+except ImportError:
+    from prodreqs_base_class import *
+try:
+    from .config import *
+except ImportError:
+    from config import *
 
 # config.py
 TEST_VOLTAGES = [65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
@@ -126,7 +133,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 self.voltage_shutdown_event.clear()
 
                 if not self.hw_simulate:
-                    # self.connect_device()
+                    self.connect_device()
                     self.verify_communication()
                     if self.shutdown_event.is_set():
                         continue
@@ -141,17 +148,13 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                     # self._verify_start_conditions(test_case, test_case_parameters["max_starting_temperature"])
                 else:
                     self.logger.info("Hardware simulation enabled; skipping device configuration.")
+                    self.connect_device()
 
-                # if self.voltage_accuracy_test:
-                #     self.sequence_duration = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
-                # elif self.test_runthrough:
-                #     self.sequence_duration = SHORT_TEST_DURATION_SECONDS
-                # elif self.voltage is not None and self.voltage <= LOW_VOLTAGE_VALUE:
-                #     self.sequence_duration = LOW_VOLTAGE_VALUE_TEST_DURATION_SECONDS
-                # else:
-                #     self.sequence_duration = TEST_CASE_DURATION_SECONDS
+                if self.test_runthrough:
+                    self.sequence_duration = SHORT_TEST_DURATION_SECONDS
+                else:
+                    self.sequence_duration = VOLTAGE_ACCURACY_NO_LOAD_TEST_DURATION_SECONDS
 
-            
                 self.logger.info("Running console voltage accuracy test under no-load conditions...")
                 self.interface.hvcontroller.set_voltage(self.voltage)
                 self.logger.info("Turning on HV for voltage accuracy test...")
@@ -257,7 +260,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                         "TEST CASE %d FAILED due to unexpected error.",
                         self.test_case_num,
                     )
-                    self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                    self.test_results[self.test_case_num].status = "FAILED (unexpected error)"
                 
                 self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
                 # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
