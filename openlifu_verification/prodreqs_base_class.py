@@ -70,18 +70,19 @@ def _base_path():
 
 MIN_REQUIRED_CONSOLE_FW_VERSION = "1.2.4"
 MIN_REQUIRED_TX_FW_VERSION = "2.0.5"
+MAX_STARTING_TEMP = 35
 
 # ------------------- Test Case Definitions ------------------- #
 TEST_CASES = [
-    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 50, "duty_cycle": 18, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 45, "duty_cycle": 22, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 40, "duty_cycle": 28, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 200, "max_starting_temperature": 32},
-    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 200, "max_starting_temperature": 32},
+    {"voltage": 65, "duty_cycle": 5,  "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 60, "duty_cycle": 10, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 55, "duty_cycle": 15, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 50, "duty_cycle": 18, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 45, "duty_cycle": 22, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 40, "duty_cycle": 28, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 35, "duty_cycle": 35, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 30, "duty_cycle": 40, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
+    {"voltage": 25, "duty_cycle": 45, "PRI_ms": 200, "max_starting_temperature": MAX_STARTING_TEMP},
     {"voltage": 20, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
     {"voltage": 15, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
     {"voltage": 10, "duty_cycle": 50, "PRI_ms": 200, "max_starting_temperature": 60},
@@ -381,7 +382,6 @@ class TestSonicationDurationBase:
             TX_test_mode=self.hw_simulate,
             HV_test_mode=self.hw_simulate,
             voltage_table_selection="evt0",
-            sequence_time_selection="stress_test",
             run_async=True
         )
         time.sleep(2)
@@ -392,20 +392,6 @@ class TestSonicationDurationBase:
         monitor_thread.daemon = True
         monitor_thread.start()
 
-        self.interface._tx_uart.signal_connect.connect(
-            lambda desc, port: self.logger.info("TX connected on %s", port)
-        )
-        self.interface._tx_uart.signal_disconnect.connect(
-            lambda desc, port: self.logger.info("TX disconnected from %s", port)
-        )
-        if self.interface._hv_uart is not None:
-            self.interface._hv_uart.signal_connect.connect(
-                lambda desc, port: self.logger.info("HV connected on %s", port)
-            )
-            self.interface._hv_uart.signal_disconnect.connect(
-                lambda desc, port: self.logger.info("HV disconnected from %s", port)
-            )
-            
         time.sleep(2)
         
         tx_connected, hv_connected = self.interface.is_device_connected()
@@ -423,29 +409,13 @@ class TestSonicationDurationBase:
                         self.logger.error("Error turning on 12V: %s", e)
             except Exception as e:
                 self.logger.error("Error turning on 12V after 3 attempts: %s", e)
-            time.sleep(2)
-
-            # Reinitialize interface after powering 12V
-            try:
-                self.interface.stop_monitoring()
-            except Exception as e:
-                self.logger.warning("Error stopping monitoring during reinit: %s", e)
-
-            # with contextlib.suppress(Exception):
-            #     del self.interface
-
-            # time.sleep(1)
-            # self.logger.info("Reinitializing LIFU interface after powering 12V...")
-            # self.interface = LIFUInterface(
-            #     ext_power_supply=self.use_external_power,
-            #     TX_test_mode=self.hw_simulate,
-            #     HV_test_mode=self.hw_simulate,
-            #     voltage_table_selection="evt0",
-            #     sequence_time_selection="stress_test",
-            #     run_async=True
-            # )
-            # tx_connected, hv_connected = self.interface.is_device_connected()
-            tx_connected, hv_connected = self.interface.is_device_connected()
+            # Give TX board time to boot and enumerate over USB after 12V is applied
+            for _wait in range(5):
+                time.sleep(2)
+                tx_connected, hv_connected = self.interface.is_device_connected()
+                if tx_connected:
+                    break
+                self.logger.info("Waiting for TX to enumerate... (%ds)", (_wait + 1) * 2)
 
         if not self.use_external_power:
             if hv_connected:
@@ -462,7 +432,7 @@ class TestSonicationDurationBase:
                 self.logger.info("LIFU Device fully connected.")
         else:
             self.logger.error("TX NOT fully connected.")
-            sys.exit(1)
+            raise RuntimeError("TX NOT fully connected.")
 
     def verify_communication(self) -> bool:
         """Verify communication with the LIFU device."""
@@ -648,48 +618,42 @@ class TestSonicationDurationBase:
                 element_positions = np.array([elem['position'] for elem in data['elements']])
             return element_positions
 
-        focus = np.array([xInput, yInput, zInput])
-        
         try:
-            element_positions = load_element_positions_from_file(os.path.join(_base_path(), f"pinmap_{self.num_modules}x.json"))
-            if not isinstance(element_positions, np.ndarray):
-                raise TypeError(f"Expected numpy array from load_element_positions_from_file, got {type(element_positions)}")
-                
-            numelements = element_positions.shape[0]
-            self.logger.info(f"{self.num_modules}x config file loaded with {numelements} elements")
-            
-            distances = np.sqrt(np.sum((focus - element_positions)**2, 1))
-            tof = distances * 1e-3 / SPEED_OF_SOUND
-            delays = tof.max() - tof
-            apodizations = np.ones(numelements)
+            vet_path = os.path.join(_base_path(), "pinmap_vet_34_elements.json")
+            with open(vet_path, 'r', encoding='utf-8') as f:
+                vet_data = json.load(f)
+            delays = np.array(vet_data['delays'])          # keep (N, 64) shape
+            apodizations = np.array(vet_data['apodizations'])
+            transducer_dummy = vet_data['transducer']
+            pulse_dict = {
+                "frequency": float(vet_data['pulse']['frequency']),
+                "duration":  float(vet_data['pulse']['duration']),
+                "amplitude": float(vet_data['pulse'].get('amplitude', 1.0)),
+            }
+            seq = vet_data['sequence']
+            sequence = {
+                "pulse_interval":       float(seq['pulse_interval']),
+                "pulse_count":          int(seq['pulse_count']),
+                "pulse_train_interval": float(seq['pulse_train_interval']),
+                "pulse_train_count":    int(seq['pulse_train_count']),
+            }
+            vet_voltage = float(vet_data['voltage'])
+            execution_order = vet_data.get('order')
+            self.logger.info(f"Loaded full solution from {vet_path} ({delays.shape[0]} profiles x {delays.shape[1]} channels, {vet_voltage:.0f}V)")
         except Exception as e:
-            self.logger.error(f"Error calculating solution arrays: {type(e).__name__}: {e}")
-            raise RuntimeError(f"Error calculating solution arrays: {e}")
-        
-        sequence = {
-            "pulse_interval": float(pulse_interval_seconds),
-            "pulse_count": int(pulseCount),
-            "pulse_train_interval": float(trainInterval),
-            "pulse_train_count": int(trainCount)
-        }
-        transducer_dummy = {"elements": [{"position": pos.tolist()} for pos in element_positions]}
-        
-        # Ensure pulse dict has proper types (matching original implementation)
-        pulse_dict = {
-            "frequency": float(frequency_hz),
-            "duration": float(duration_seconds),
-            "amplitude": float(1.0)
-        }
-        
+            self.logger.error(f"Error loading pinmap_vet.json: {type(e).__name__}: {e}")
+            raise RuntimeError(f"Error loading pinmap_vet.json: {e}")
+
         solution = {
             "id": "solution",
             "name": "Solution",
-            "delays": delays.tolist() if isinstance(delays, np.ndarray) else delays,
-            "apodizations": apodizations.tolist() if isinstance(apodizations, np.ndarray) else apodizations,
+            "delays": delays.tolist(),
+            "apodizations": apodizations.tolist(),
             "pulse": pulse_dict,
             "sequence": sequence,
-            "voltage": float(voltage),
-            "transducer": transducer_dummy
+            "voltage": vet_voltage,
+            "transducer": transducer_dummy,
+            "execution_order": execution_order,
         }
         
         # Log solution structure right after creation (before any modifications)
@@ -925,6 +889,7 @@ class TestSonicationDurationBase:
             self.interface.set_solution(
                 solution=solution,
                 trigger_mode=trigger_mode,
+                _allow_unsafe_solution=True,
             )
 
         try:
@@ -1443,6 +1408,8 @@ class TestSonicationDurationBase:
 
         for test_case, test_case_parameters in enumerate(TEST_CASES[self.starting_test_case - 1:], start=self.starting_test_case):
             r = self.test_results.get(test_case)
+            if not isinstance(r, TestCaseResult):
+                r = TestCaseResult(status=str(r) if r is not None else "NOT RUN")
             act_start  = f"{r.starting_temperature:.2f}C" if r and r.starting_temperature is not None else " -   "
             final      = f"{r.final_temperature:.2f}C" if r and r.final_temperature is not None else " - "
             max_dv     = f"{r.max_voltage_deviation_absolute:.2f}V" if r and r.max_voltage_deviation_absolute is not None else " - "
@@ -1549,7 +1516,10 @@ class TestSonicationDurationBase:
                     else:
                         self.sequence_duration = TEST_CASE_DURATION_SECONDS
                     
-                    self.configure_solution()
+                    if not self.hw_simulate:
+                        self.configure_solution()
+                    else:
+                        self.logger.info("Simulation mode: skipping solution configuration.")
 
                     if self.shutdown_event.is_set():
                         self.test_status = "aborted by user"
@@ -1565,6 +1535,7 @@ class TestSonicationDurationBase:
                         self.test_case_start_time = time.time()
                     else:
                         self.logger.info("Simulated Trigger start... (no hardware)")
+                        self.test_case_start_time = time.time()
 
                     self.logger.info("Trigger Running... (Press CTRL-C to stop early)")
                     self.test_status = "running"
@@ -1671,7 +1642,7 @@ class TestSonicationDurationBase:
                             "TEST CASE %d FAILED due to unexpected error.",
                             self.test_case_num,
                         )
-                        self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                        self.test_results[self.test_case_num].status = "FAILED (unexpected error)"
                     
                     self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
 

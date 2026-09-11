@@ -14,8 +14,18 @@ from serial.serialutil import SerialException
 
 import numpy as np
 
-from .prodreqs_base_class import *
-from .config import *
+# from .prodreqs_base_class import *
+# from .config import *
+
+try:
+    from .prodreqs_base_class import *
+except ImportError:
+    from prodreqs_base_class import *
+
+try:
+    from .config import *
+except ImportError:
+    from config import *
 
 SINGLE_TEST_CASE_FOR_SHORT_DURATION_TEST = 2
 
@@ -137,7 +147,10 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             else:
                 self.sequence_duration = TEST_CASE_DURATION_SECONDS
             
-            self.configure_solution()
+            if not self.hw_simulate:
+                self.configure_solution()
+            else:
+                self.logger.info("Simulation mode: skipping solution configuration.")
             if self.shutdown_event.is_set():
                 self.test_status = "aborted by user"
                 return
@@ -156,6 +169,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
                 self.test_case_start_time = time.time()
             else:
                 self.logger.info("Simulated Trigger start... (no hardware)")
+                self.test_case_start_time = time.time()
 
             self.logger.info("Trigger Running... (Press CTRL-C to stop early)")
             self.test_status = "running"
@@ -256,7 +270,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
                     "TEST CASE %d FAILED due to unexpected error.",
                     self.test_case_num,
                 )
-                self.test_results[self.test_case_num] = "FAILED (unexpected error)"
+                self.test_results[self.test_case_num].status = "FAILED (unexpected error)"
             
             self.logger.info("TEST CASE %d ran for a total of %s.", self.test_case_num, format_duration(duration))
             # self.test_results[self.test_case_num].cooldown_time_elapsed = 0.0
@@ -268,6 +282,8 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
         self.logger.info("\n\nTest Case Summary:\n")
 
         r = self.test_results.get(self.test_case_num)
+        if not isinstance(r, TestCaseResult):
+            r = TestCaseResult(status=str(r) if r is not None else "NOT RUN")
         test_case_parameters = TEST_CASES[self.test_case_num - 1]
         act_start  = f"{r.starting_temperature:.2f}C" if r and r.starting_temperature is not None else " -   "
         final      = f"{r.final_temperature:.2f}C" if r and r.final_temperature is not None else " - "
