@@ -48,6 +48,7 @@ class TransmitterHeatingPlaceholder(TestSonicationDurationBase):
             skip_logfile=args.skip_logfile,
             bypass_console_fw=args.bypass_console_fw,
             bypass_tx_fw=args.bypass_tx_fw,
+            bypass_tx_power_off=getattr(args, 'bypass_tx_power_off', False),
             test_case=args.test_case,
             interface=getattr(args, 'interface', None)
         )

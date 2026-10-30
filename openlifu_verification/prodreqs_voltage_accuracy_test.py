@@ -48,6 +48,7 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
             skip_logfile=args.skip_logfile,
             bypass_console_fw=args.bypass_console_fw,
             bypass_tx_fw=args.bypass_tx_fw,
+            bypass_tx_power_off=getattr(args, 'bypass_tx_power_off', False),
             test_case=args.test_case,
             interface=getattr(args, 'interface', None)
         )
@@ -230,7 +231,9 @@ class VoltageAccuracyTest(TestSonicationDurationBase):
                 # Power down and cleanup
                 if not self.hw_simulate:
                     with contextlib.suppress(Exception):
-                        self.turn_off_console_and_tx()
+                        self.turn_off_console_and_tx(
+                            preserve_tx=self.bypass_tx_power_off and self.sequence_complete_event.is_set()
+                        )
                     self.cleanup_interface()
 
                 # Final status log

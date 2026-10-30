@@ -39,6 +39,7 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             test_runthrough=args.test_runthrough,
             bypass_console_fw=args.bypass_console_fw,
             bypass_tx_fw=args.bypass_tx_fw,
+            bypass_tx_power_off=getattr(args, 'bypass_tx_power_off', False),
             console_shutoff_temp=args.console_shutoff_temp,
             tx_shutoff_temp=args.tx_shutoff_temp,
             ambient_shutoff_temp=args.ambient_shutoff_temp,
@@ -243,7 +244,9 @@ class TransmitterShortVerificationTest(TestSonicationDurationBase):
             # Power down and cleanup
             if not self.hw_simulate:
                 with contextlib.suppress(Exception):
-                    self.turn_off_console_and_tx()
+                    self.turn_off_console_and_tx(
+                        preserve_tx=self.bypass_tx_power_off and self.sequence_complete_event.is_set()
+                    )
                 self.cleanup_interface()
 
             # Final status log

@@ -146,6 +146,7 @@ class TestSonicationDurationBase:
             skip_logfile: bool = False,
             bypass_console_fw: bool = False,
             bypass_tx_fw: bool = False,
+            bypass_tx_power_off: bool = False,
             test_case: Optional[int] = None,
             interface: Optional[LIFUInterface] = None
     ) -> None:
@@ -196,6 +197,7 @@ class TestSonicationDurationBase:
         self.test_runthrough = test_runthrough
         self.bypass_console_fw = bypass_console_fw
         self.bypass_tx_fw = bypass_tx_fw
+        self.bypass_tx_power_off = bypass_tx_power_off
 
         # Safety parameters from args
         self.console_shutoff_temp_C = console_shutoff_temp
@@ -618,10 +620,39 @@ class TestSonicationDurationBase:
                 element_positions = np.array([elem['position'] for elem in data['elements']])
             return element_positions
 
+        def normalize_flat_pinmap(flat):
+            """Convert a flat pinmap (frequency_khz, pulse_length_us, apodization, ...) to the full solution format."""
+            # Flat pinmaps carry no transducer definition; borrow the 1x400 one from the vet pinmap
+            with open(os.path.join(_base_path(), "pinmap_vet_34_elements.json"), 'r', encoding='utf-8') as f:
+                transducer = json.load(f)['transducer']
+            if 'sensitivity' in flat:
+                transducer['sensitivity'] = flat['sensitivity']
+            selections = flat.get('pulse_train_count_selections') or [1]
+            return {
+                'delays': flat['delays'],
+                'apodizations': flat['apodization'],
+                'transducer': transducer,
+                'pulse': {
+                    'frequency': float(flat['frequency_khz']) * 1e3,
+                    'duration': float(flat['pulse_length_us']) * 1e-6,
+                    'amplitude': 1.0,
+                },
+                'sequence': {
+                    'pulse_interval': float(flat['pulse_interval_ms']) * 1e-3,
+                    'pulse_count': int(flat['pulse_count']),
+                    'pulse_train_interval': float(flat.get('pulse_train_interval_s', 0)),
+                    'pulse_train_count': int(max(selections)),
+                },
+                'voltage': flat['voltage'],
+                'order': flat.get('order', list(range(1, len(flat['delays']) + 1))),
+            }
+
         try:
-            vet_path = os.path.join(_base_path(), "pinmap_vet_34_elements.json")
+            vet_path = os.path.join(_base_path(), "pinmap_diathermy_30v.json")
             with open(vet_path, 'r', encoding='utf-8') as f:
                 vet_data = json.load(f)
+            if 'apodizations' not in vet_data and 'apodization' in vet_data:
+                vet_data = normalize_flat_pinmap(vet_data)
             delays = np.array(vet_data['delays'])          # keep (N, 64) shape
             apodizations = np.array(vet_data['apodizations'])
             transducer_dummy = vet_data['transducer']
@@ -641,8 +672,8 @@ class TestSonicationDurationBase:
             execution_order = vet_data.get('order')
             self.logger.info(f"Loaded full solution from {vet_path} ({delays.shape[0]} profiles x {delays.shape[1]} channels, {vet_voltage:.0f}V)")
         except Exception as e:
-            self.logger.error(f"Error loading pinmap_vet.json: {type(e).__name__}: {e}")
-            raise RuntimeError(f"Error loading pinmap_vet.json: {e}")
+            self.logger.error(f"Error loading pinmap_diathermy_30v.json: {type(e).__name__}: {e}")
+            raise RuntimeError(f"Error loading pinmap_diathermy_30v.json: {e}")
 
         solution = {
             "id": "solution",
@@ -1291,8 +1322,10 @@ class TestSonicationDurationBase:
             else:
                 self.logger.info(f"Current temperature of {temp}C is greater than max starting "
                                  f"temperature of {starting_temperature}C for test case {test_case}. "
-                                 f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again.")
-            self.turn_off_console_and_tx()
+                                 + (f"Transmitter will remain powered during the {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60}-minute cooldown, then temperature will be checked again."
+                                    if self.bypass_tx_power_off else
+                                    f"Transmitter will turn off for {TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60} minutes to cool down and then check again."))
+            self.turn_off_console_and_tx(preserve_tx=self.bypass_tx_power_off)
             self.cleanup_interface()
 
             if self.shutdown_event.wait(TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS):
@@ -1346,20 +1379,26 @@ class TestSonicationDurationBase:
     # Hardware shutdown & cleanup
     # ------------------------------------------------------------------ #
 
-    def turn_off_console_and_tx(self) -> None:
-        """Safely turn off HV and 12V if console is used."""
+    def turn_off_console_and_tx(self, *, preserve_tx: bool = False) -> None:
+        """Safely turn off HV and, unless requested otherwise, TX 12V."""
         if self.interface is None:
             return
         if self.use_external_power:
             return
 
         try:
-            self.logger.info("Turning off HV and 12V...")
+            self.logger.info("Turning off HV%s...", "" if preserve_tx else " and 12V")
             with contextlib.suppress(Exception):
                 self.interface.hvcontroller.turn_hv_off()
-            with contextlib.suppress(Exception):
-                self.interface.hvcontroller.turn_12v_off()
-            self.logger.info("HV and 12V turned off.")
+            if preserve_tx:
+                self.logger.info(
+                    "TX power will remain on; temperature will be checked again in %d minutes.",
+                    TIME_BETWEEN_TESTS_TEMPERATURE_CHECK_SECONDS // 60,
+                )
+            else:
+                with contextlib.suppress(Exception):
+                    self.interface.hvcontroller.turn_12v_off()
+                self.logger.info("HV and 12V turned off.")
         except Exception as e:
             self.logger.warning("Error turning off HV/12V: %s", e)
 
@@ -1615,7 +1654,9 @@ class TestSonicationDurationBase:
                     # Power down and cleanup
                     if not self.hw_simulate:
                         with contextlib.suppress(Exception):
-                            self.turn_off_console_and_tx()
+                            self.turn_off_console_and_tx(
+                                preserve_tx=self.bypass_tx_power_off and self.sequence_complete_event.is_set()
+                            )
                         self.cleanup_interface()
 
                     # Final status log
@@ -1750,6 +1791,11 @@ Examples:
         "--bypass-tx-fw",
         action="store_true",
         help="Bypass TX firmware version check.",
+    )
+    behavior_group.add_argument(
+        "--bypass-tx-power-off",
+        action="store_true",
+        help="Keep TX power on after a completed sequence; temperature cooldown checks still run every 5 minutes.",
     )
     behavior_group.add_argument(
         "--num-modules",
